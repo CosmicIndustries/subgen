@@ -7,7 +7,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import com.cosmicindustries.umbra.UmbraApp
 import com.cosmicindustries.umbra.ui.theme.UmbraTheme
-import rikka.shizuku.Shizuku
 
 /**
  * Hosts the VPN-consent flow (`VpnService.prepare()` can only be launched
@@ -43,12 +42,6 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         app.shizukuPermissionManager.refresh()
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        // Shizuku's pre-API-23-style permission path funnels through this callback too.
-        Shizuku.onRequestPermissionResult(requestCode, if (grantResults.isNotEmpty()) grantResults[0] else -1)
     }
 
     /** Runs [onGranted] immediately if VPN permission is already held, otherwise after the system consent dialog. */

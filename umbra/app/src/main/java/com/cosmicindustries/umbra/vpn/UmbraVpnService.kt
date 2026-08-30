@@ -174,7 +174,7 @@ class UmbraVpnService : VpnService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_vpn_ic)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.vpn_notification_title))
             .setContentText(
                 if (active) getString(R.string.vpn_notification_text_active) else getString(R.string.vpn_notification_text_idle),
