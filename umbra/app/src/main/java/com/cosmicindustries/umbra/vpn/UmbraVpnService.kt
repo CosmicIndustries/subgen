@@ -87,8 +87,11 @@ class UmbraVpnService : VpnService() {
             // owning a TUN fd exists yet, so there's nothing to leak or unwind.
             var byedpiAddr: String? = null
             if (settingsStore.byedpiWrapEnabled.first()) {
-                val udpFake = settingsStore.byedpiUdpFakeCount.first()
-                val byedpiConfig = ByeDpiConfig(udpFakeCount = udpFake)
+                val byedpiConfig = ByeDpiConfig(
+                    udpFakeCount = settingsStore.byedpiUdpFakeCount.first(),
+                    fakeTtl = settingsStore.byedpiFakeTtl.first(),
+                    customFakeData = settingsStore.byedpiCustomFakeData.first(),
+                )
                 try {
                     byeDpiEngine.start(byedpiConfig)
                     byedpiAddr = byedpiConfig.proxyAddress

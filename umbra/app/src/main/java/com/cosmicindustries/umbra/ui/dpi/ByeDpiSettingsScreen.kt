@@ -5,7 +5,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -20,9 +23,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 fun ByeDpiSettingsScreen(viewModel: ByeDpiSettingsViewModel) {
     val wrapEnabled by viewModel.wrapEnabled.collectAsStateWithLifecycle()
     val udpFakeCount by viewModel.udpFakeCount.collectAsStateWithLifecycle()
+    val fakeTtl by viewModel.fakeTtl.collectAsStateWithLifecycle()
+    val customFakeData by viewModel.customFakeData.collectAsStateWithLifecycle()
 
     Column(
-        modifier = Modifier.fillMaxWidth().padding(20.dp),
+        modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("DPI bypass", style = MaterialTheme.typography.headlineSmall)
@@ -61,6 +66,47 @@ fun ByeDpiSettingsScreen(viewModel: ByeDpiSettingsViewModel) {
                     valueRange = 0f..8f,
                     steps = 7,
                 )
+            }
+
+            if (udpFakeCount > 0) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Decoy TTL: $fakeTtl", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "The one value worth tuning per-network (byedpi --ttl, " +
+                            "default 8): pick it low enough that the decoy expires " +
+                            "before reaching your real VPN server, but high enough " +
+                            "that whatever's inspecting traffic on the way still " +
+                            "sees it. Too high and it's indistinguishable from a " +
+                            "real packet; too low and it never gets far enough to " +
+                            "matter. If wrapping seems to make no difference, try " +
+                            "values between 3 and 12.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Slider(
+                        value = fakeTtl.toFloat(),
+                        onValueChange = { viewModel.setFakeTtl(it.toInt()) },
+                        valueRange = 1f..32f,
+                        steps = 30,
+                    )
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Custom decoy payload (advanced)", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Overrides byedpi's built-in decoy bytes (--fake-data). " +
+                            "Leave blank to use byedpi's default. Only the content " +
+                            "changes — length and send count are unaffected.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = customFakeData,
+                        onValueChange = viewModel::setCustomFakeData,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Decoy bytes (optional)") },
+                    )
+                }
             }
         }
     }

@@ -68,6 +68,26 @@ which produces the UAPI text `wgTurnOn`'s `settings` parameter expects) is
 still used from the `com.wireguard.android:tunnel` Maven artifact — only
 `GoBackend` itself was dropped.
 
+### Which byedpi flags actually apply to a UDP-only relay
+
+byedpi has a large CLI surface (`--split`/`--disorder`/`--oob`/`--tlsrec`/
+`--fake`/etc.), but almost all of it is TCP-segment-framing logic with no
+meaning here, since byedpi's only job in this app is relaying WireGuard's
+UDP transport (see above) — not proxying arbitrary TCP connections. Rather
+than guess which flags matter, `external/byedpi/desync.c`'s `desync_udp()`
+was read directly: it only ever touches `dp->udp_fake_count`,
+`dp->fake_data`, `dp->fake_offset`, and `dp->ttl` off its params struct.
+`dpi/ByeDpiConfig.kt` exposes exactly those three that materially change
+behavior — `-a/--udp-fake` (decoy count, already had a UI control),
+`-t/--ttl` (decoy TTL, byedpi's own default is 8 per `DEFAULT_TTL` in
+desync.c — this is the value the upstream README calls out as the one to
+actually tune per-network, since too high a TTL means the decoy is
+indistinguishable from a real packet and too low means it never reaches
+whatever's inspecting traffic), and `-l/--fake-data` (custom decoy
+payload, using byedpi's own `ftob()` "leading `:` means literal string,
+not a file path" convention from main.c, since a bare path can't resolve
+to anything inside this app's sandbox anyway).
+
 ### What's actually been verified vs. not
 
 The Go/C side got unusually thorough local verification for something

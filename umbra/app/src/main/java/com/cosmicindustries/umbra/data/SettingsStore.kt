@@ -26,6 +26,10 @@ class SettingsStore(private val context: Context) {
     /** Whether WireGuard's own transport is relayed through byedpi (see WireGuardBridge.wgTurnOnViaByedpi). */
     val byedpiWrapEnabled: Flow<Boolean> = context.dataStore.data.map { prefs -> prefs[KEY_BYEDPI_WRAP_ENABLED] ?: true }
     val byedpiUdpFakeCount: Flow<Int> = context.dataStore.data.map { prefs -> prefs[KEY_BYEDPI_UDP_FAKE_COUNT] ?: 2 }
+    /** TTL stamped on byedpi's decoy UDP packets (`-t/--ttl`); byedpi's own default is 8. */
+    val byedpiFakeTtl: Flow<Int> = context.dataStore.data.map { prefs -> prefs[KEY_BYEDPI_FAKE_TTL] ?: 8 }
+    /** Overrides byedpi's decoy payload (`-l/--fake-data`); blank keeps byedpi's own built-in default. */
+    val byedpiCustomFakeData: Flow<String> = context.dataStore.data.map { prefs -> prefs[KEY_BYEDPI_CUSTOM_FAKE_DATA] ?: "" }
 
     suspend fun setRunning(running: Boolean) {
         context.dataStore.edit { it[KEY_RUNNING] = running }
@@ -49,6 +53,14 @@ class SettingsStore(private val context: Context) {
         context.dataStore.edit { it[KEY_BYEDPI_UDP_FAKE_COUNT] = count }
     }
 
+    suspend fun setByedpiFakeTtl(ttl: Int) {
+        context.dataStore.edit { it[KEY_BYEDPI_FAKE_TTL] = ttl }
+    }
+
+    suspend fun setByedpiCustomFakeData(data: String) {
+        context.dataStore.edit { it[KEY_BYEDPI_CUSTOM_FAKE_DATA] = data }
+    }
+
     suspend fun setStartOnBoot(enabled: Boolean) {
         context.dataStore.edit { it[KEY_START_ON_BOOT] = enabled }
     }
@@ -62,5 +74,7 @@ class SettingsStore(private val context: Context) {
         private val KEY_START_ON_BOOT = booleanPreferencesKey("start_on_boot")
         private val KEY_BYEDPI_WRAP_ENABLED = booleanPreferencesKey("byedpi_wrap_enabled")
         private val KEY_BYEDPI_UDP_FAKE_COUNT = intPreferencesKey("byedpi_udp_fake_count")
+        private val KEY_BYEDPI_FAKE_TTL = intPreferencesKey("byedpi_fake_ttl")
+        private val KEY_BYEDPI_CUSTOM_FAKE_DATA = stringPreferencesKey("byedpi_custom_fake_data")
     }
 }

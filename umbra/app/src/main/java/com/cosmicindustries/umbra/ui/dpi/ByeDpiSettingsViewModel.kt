@@ -15,9 +15,15 @@ class ByeDpiSettingsViewModel(private val app: UmbraApp) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
     val udpFakeCount: StateFlow<Int> = app.settingsStore.byedpiUdpFakeCount
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 2)
+    val fakeTtl: StateFlow<Int> = app.settingsStore.byedpiFakeTtl
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 8)
+    val customFakeData: StateFlow<String> = app.settingsStore.byedpiCustomFakeData
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
 
     fun setWrapEnabled(enabled: Boolean) = viewModelScope.launch { app.settingsStore.setByedpiWrapEnabled(enabled) }
     fun setUdpFakeCount(count: Int) = viewModelScope.launch { app.settingsStore.setByedpiUdpFakeCount(count) }
+    fun setFakeTtl(ttl: Int) = viewModelScope.launch { app.settingsStore.setByedpiFakeTtl(ttl) }
+    fun setCustomFakeData(data: String) = viewModelScope.launch { app.settingsStore.setByedpiCustomFakeData(data) }
 
     companion object {
         fun factory(app: UmbraApp) = SimpleViewModelFactory { ByeDpiSettingsViewModel(app) }

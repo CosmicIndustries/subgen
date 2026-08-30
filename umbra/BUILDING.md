@@ -119,8 +119,22 @@ verifies the *import paths* work, not connectivity.
 
 ## 7. DPI-bypass tuning
 
-The DPI Bypass tab has one switch — wrap WireGuard's own transport through
-byedpi — and one knob, the number of fake UDP packets byedpi sends ahead of
-each real one (`-a/--udp-fake`). This targets networks that specifically
-detect and block/throttle WireGuard's own traffic pattern, not general
-website blocking.
+The DPI Bypass tab wraps WireGuard's own transport through byedpi and
+exposes the parts of byedpi's config that actually affect a UDP relay
+(the rest of byedpi's CLI is TCP-only and doesn't apply — see
+`ARCHITECTURE.md`):
+
+- **Fake UDP packets** (`-a/--udp-fake`): how many decoy datagrams
+  precede each real one.
+- **Decoy TTL** (`-t/--ttl`, only shown once fake packets > 0): the value
+  worth actually tuning per-network. byedpi's own default is 8. If
+  wrapping makes no observable difference, try values between 3 and 12 —
+  too high and the decoy behaves just like a real packet (no bypass
+  effect); too low and it never reaches whatever's inspecting traffic on
+  the way to your VPN server.
+- **Custom decoy payload** (`-l/--fake-data`, advanced/optional): override
+  byedpi's built-in decoy bytes. Leave blank unless you have a specific
+  reason to change it.
+
+This targets networks that specifically detect and block/throttle
+WireGuard's own traffic pattern, not general website blocking.
