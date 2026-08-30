@@ -117,9 +117,35 @@ Other known-unverified pieces, carried over from earlier:
   sources jar from Maven Central), so `firewall/ShizukuFirewall.kt` uses
   `Shizuku.bindUserService()` with a custom AIDL service
   (`firewall/IUserService.aidl` + `UserService.kt`) instead.
-- The exact `cmd netpolicy`/`cmd appops` grammar in
-  `ShizukuFirewall.kt`'s block/unblock commands for a full per-UID network
-  block — worth an `adb shell cmd netpolicy --help` on a real device.
+- `ShizukuFirewall.kt` originally used only `cmd netpolicy set-uid-policy
+  <uid> reject-all`. Investigating
+  [dorumrr/de1984](https://github.com/dorumrr/de1984) (a hardware-tested
+  Shizuku/root firewall app) turned up a real problem with that: the
+  `reject-all` policy value (`POLICY_REJECT_ALL`) isn't part of AOSP at
+  all — it only exists on LineageOS-type ROMs (de1984's `FIREWALL.md`,
+  verified on hardware). On a stock/OEM ROM the command likely stored a
+  policy value the ROM's network stack doesn't act on, silently leaving
+  WiFi unblocked for "Blocked" apps. Fixed by preferring Android 13+'s
+  `OEM_DENY_3` UID firewall chain instead (`cmd connectivity
+  set-chain3-enabled`/`set-package-networking-enabled`), the mechanism
+  de1984's own `ConnectivityManagerFirewallBackend` uses and has verified
+  actually blocks all networking for a package — still just `cmd`
+  commands over the same Shizuku user-service exec() path, no new
+  dependency. `netpolicy`/`appops` remain as the pre-13 fallback, with
+  the same limitation de1984 documents (may only stop background mobile
+  data on a non-LineageOS ROM). See `ShizukuFirewall.kt`'s class doc for
+  the full citation.
+- What de1984 does that Umbra deliberately doesn't: de1984's fourth
+  backend is VPN itself (block by simply not routing an app into its
+  tunnel) — not applicable here, since Umbra's one VpnService is already
+  occupied by WireGuard; there's no free VPN slot to fall back to if
+  Shizuku is unavailable, so Umbra's blocking is Shizuku-only with no
+  privilege-less fallback. de1984 also runs continuous adaptive health
+  monitoring (15s/60s backend-liveness checks) and a full state machine
+  to detect Shizuku dying and switch backends live; Umbra's Shizuku calls
+  are one-shot (applied when the rule changes or the tunnel starts), with
+  no ongoing monitoring for Shizuku dying mid-session — a reasonable
+  follow-up if that turns out to matter in practice.
 - `dev.rikka.shizuku:provider`'s `ShizukuProvider` needed a manual
   `<provider>` declaration in `AndroidManifest.xml` — the library ships
   the class but deliberately doesn't declare it itself (confirmed by

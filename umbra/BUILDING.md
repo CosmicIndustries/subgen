@@ -79,6 +79,13 @@ The per-app "Blocked" mode requires the separate
 Umbra works without it — you just won't get OS-level hard blocking for
 apps tagged "Blocked"; the WireGuard tunnel itself doesn't need Shizuku.
 
+**Android 13+ recommended for a real block.** On API 33+, "Blocked" uses
+the `OEM_DENY_3` UID firewall chain (via `cmd connectivity`), which
+actually stops all networking for the app. Below API 33 it falls back to
+`cmd netpolicy`, which on most non-LineageOS ROMs only stops *background*
+mobile data — the app can still reach WiFi and foreground mobile data.
+See `ARCHITECTURE.md`'s firewall section for why.
+
 ## 6. WireGuard config
 
 The WireGuard tab has three ways to load a config — Umbra keeps exactly
