@@ -12,4 +12,7 @@ captures/
 *.aab
 *.keystore
 *.jks
+# Pinned debug-only signing key (app/debug.keystore) — intentionally
+# committed so every build shares one signature; see build.gradle.kts.
+!app/debug.keystore
 !gradle/wrapper/gradle-wrapper.jar

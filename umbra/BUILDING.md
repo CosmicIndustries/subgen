@@ -53,6 +53,19 @@ the native or Go layers, see `ARCHITECTURE.md`'s "What's actually been
 verified vs. not" section for the pieces most likely to need adjustment on
 real-device testing.
 
+### Installing a new release APK over an old one
+
+Every build is signed with the same pinned debug key
+(`app/debug.keystore`, wired via `signingConfigs.debug` in
+`app/build.gradle.kts`), so newer releases install as a normal update over
+older ones. **If you installed a release before this was added** (builds
+15 and earlier), your device has an APK signed with a one-off key that
+GitHub Actions generated fresh for that specific CI run — installing a
+newer, differently-signed APK over it fails with a signature mismatch
+(often surfacing as a generic "app not installed" toast rather than
+naming the real reason). Uninstall the old Umbra app once; every build
+from here on shares one signature and updates normally.
+
 ## 5. Shizuku setup (optional, for the hard-block firewall)
 
 The per-app "Blocked" mode requires the separate

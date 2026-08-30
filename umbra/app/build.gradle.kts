@@ -41,6 +41,25 @@ android {
         }
     }
 
+    signingConfigs {
+        getByName("debug") {
+            // Pinned so every build — CI or local — is signed with the same debug
+            // key. Without this, AGP falls back to auto-generating a fresh
+            // ~/.android/debug.keystore per machine; since CI runs on a clean VM
+            // every time, each GitHub Actions build got a different random debug
+            // key, so installing a newer release APK over an older one silently
+            // failed with a signature mismatch instead of updating — the actual
+            // cause behind "the new buttons aren't showing up," since the device
+            // was still running whatever build installed first. Not a secret:
+            // Android debug keys are never used for anything but local/dev
+            // installs, so committing this is the normal, documented fix.
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -50,6 +69,7 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
