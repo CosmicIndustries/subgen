@@ -1,0 +1,51 @@
+name: Build Umbra APK
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "umbra/**"
+      - ".github/workflows/build-umbra.yml"
+  pull_request:
+    paths:
+      - "umbra/**"
+      - ".github/workflows/build-umbra.yml"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: umbra
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK + CMake
+        run: |
+          sdkmanager --install "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: umbra-debug-apk
+          path: umbra/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
