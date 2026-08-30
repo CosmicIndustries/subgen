@@ -10,6 +10,14 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!--
+      QR-code WireGuard config import (ui/wireguard's "Scan QR" button, via
+      zxing-android-embedded's CaptureActivity). Camera is optional — config
+      text can still be pasted or imported from a .conf/.zip file without it.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <!--
       Umbra is a per-app firewall: it must enumerate every installed app, not
       just ones it has an intent-based reason to see. Same requirement as
       Rethink and ShizuWall. Fine for a sideloaded app; would need Play Console

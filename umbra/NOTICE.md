@@ -30,6 +30,7 @@ project, not adapted from either upstream.
 |---|---|---|
 | [WireGuard for Android](https://git.zx2c4.com/wireguard-android/) (`com.wireguard.android:tunnel`) | Apache-2.0 | Only `com.wireguard.config.Config` (parsing + `toWgUserspaceString()`) — `GoBackend` itself is not used, see `ARCHITECTURE.md` |
 | [Shizuku](https://github.com/RikkaApps/Shizuku) (`dev.rikka.shizuku:api`, `:provider`) | Apache-2.0 | Privileged-without-root command execution for the hard-block firewall (`firewall/ShizukuFirewall.kt`) |
+| [ZXing Android Embedded](https://github.com/journeyapps/zxing-android-embedded) (`com.journeyapps:zxing-android-embedded`) | Apache-2.0 | QR-code WireGuard config import (`ui/wireguard/WireGuardConfigScreen.kt`'s "Scan QR" button) — the same library the official WireGuard Android app uses, confirmed by decompiling its APK |
 | AndroidX (Room, DataStore, Security-Crypto, Compose, Navigation, WorkManager, …) | Apache-2.0 | Standard Android app infrastructure |
 | Kotlin / kotlinx.coroutines | Apache-2.0 | Language + async runtime |
 

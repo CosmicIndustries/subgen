@@ -7,7 +7,8 @@ picking one:
 - **[WireGuard](https://www.wireguard.com/)** — the actual `wireguard-go`
   protocol implementation, driven directly (not through the official app's
   `GoBackend`) so it can share Umbra's own VPN service with the other two
-  pieces. See [ARCHITECTURE.md](ARCHITECTURE.md).
+  pieces. Config can be pasted, scanned as a QR code, or imported from a
+  `.conf`/`.zip` file. See [ARCHITECTURE.md](ARCHITECTURE.md).
 - **[ByeByeDPI](https://github.com/hufrea/byedpi)** (`ciadpi`) — a local
   desync proxy. Rather than being a separate per-app routing option, it
   wraps WireGuard's *own* connection to your VPN server in its DPI-evasion

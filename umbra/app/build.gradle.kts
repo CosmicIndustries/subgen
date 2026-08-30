@@ -105,6 +105,14 @@ dependencies {
     // Official WireGuard tunnel library (wraps wireguard-go over JNI). Apache-2.0.
     implementation(libs.wireguard.tunnel)
 
+    // QR-code config import. Same library the official WireGuard Android app uses
+    // (confirmed by decompiling its APK: journeyapps package names, zxing_capture.xml
+    // layout resources, and CaptureActivity all present) — its CaptureActivity ships
+    // in the AAR's own manifest and handles the camera runtime-permission prompt
+    // itself, so no extra Activity declaration or permission-request code is needed
+    // here beyond the CAMERA permission in AndroidManifest.xml.
+    implementation(libs.zxing.embedded)
+
     // Shizuku: privileged-without-root command execution for the hard per-app
     // firewall path. Apache-2.0. The user must have the separate Shizuku app
     // (or `adb shell` pairing) running on-device; see BUILDING.md.

@@ -68,11 +68,41 @@ apps tagged "Blocked"; the WireGuard tunnel itself doesn't need Shizuku.
 
 ## 6. WireGuard config
 
-On the WireGuard tab, paste a standard `wg-quick`-style config (the same
-text you'd get from a `.conf` file or QR code from your VPN provider or
-`wg genkey`/`wg pubkey` setup). Umbra keeps exactly one profile, and
-currently supports a single `[Peer]` block if you enable DPI-bypass
-wrapping (see below).
+The WireGuard tab has three ways to load a config — Umbra keeps exactly
+one profile, and currently supports a single `[Peer]` block if you enable
+DPI-bypass wrapping (see below):
+
+- **Paste** the config text directly into the text field, same as before.
+- **Scan QR** — the same QR format the official WireGuard app exports:
+  the raw wg-quick text encoded directly into the code. Uses
+  `zxing-android-embedded` (same library the official app uses,
+  confirmed by decompiling it), so it also requests camera permission
+  the first time.
+- **Import file** — pick a `.conf` file, or a `.zip` containing one
+  (common when a provider bundles multiple peer configs together; Umbra
+  extracts the first `.conf` entry alphabetically and tells you if it
+  skipped others). Detected by the zip file's own magic bytes, not by
+  filename or the content provider's reported MIME type, so it works
+  even if your file manager reports `.conf` as `text/plain` or
+  `application/octet-stream`.
+
+### Testing the import paths without a real VPN provider
+
+`scripts/generate-example-config.sh` generates a real, syntactically
+valid wg-quick config — a real client keypair, but a placeholder
+`[Peer]` (fake server key + `vpn.example.com` endpoint, since the script
+has no server to actually talk to) — plus `.zip` and (if `qrencode` is
+installed) `.conf.png` versions of the same file, so you can exercise
+Scan QR and Import file against something real before wiring up an
+actual provider:
+
+```sh
+./scripts/generate-example-config.sh ./example-wg
+```
+
+Edit the output's `PublicKey`/`Endpoint` to your real server's values
+before expecting the tunnel to actually connect — the script only
+verifies the *import paths* work, not connectivity.
 
 ## 7. DPI-bypass tuning
 
