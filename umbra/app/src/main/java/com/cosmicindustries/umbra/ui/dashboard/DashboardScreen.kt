@@ -36,6 +36,7 @@ fun DashboardScreen(
     val activeMode by viewModel.activeMode.collectAsStateWithLifecycle()
     val shizukuStatus by viewModel.shizukuStatus.collectAsStateWithLifecycle()
     val wireGuardState by viewModel.wireGuardState.collectAsStateWithLifecycle()
+    val wireGuardError by viewModel.wireGuardError.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     Column(
@@ -62,6 +63,9 @@ fun DashboardScreen(
                 }
             },
         )
+        wireGuardError?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
 
         ModeCard(
             title = "DPI Bypass",

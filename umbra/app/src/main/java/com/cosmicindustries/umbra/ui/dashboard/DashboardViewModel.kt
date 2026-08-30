@@ -13,6 +13,7 @@ import com.cosmicindustries.umbra.tunnel.WireGuardConfigStore
 import com.cosmicindustries.umbra.tunnel.WireGuardEngine
 import com.cosmicindustries.umbra.vpn.UmbraVpnService
 import com.wireguard.android.backend.Tunnel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -29,6 +30,9 @@ class DashboardViewModel(private val app: UmbraApp) : ViewModel() {
     val shizukuStatus: StateFlow<ShizukuStatus> = app.shizukuPermissionManager.status
 
     val wireGuardState: StateFlow<Tunnel.State> = wireGuardEngine.state
+
+    private val _wireGuardError = MutableStateFlow<String?>(null)
+    val wireGuardError: StateFlow<String?> = _wireGuardError
 
     fun requestShizukuPermission() = app.shizukuPermissionManager.requestPermission()
 
@@ -50,12 +54,21 @@ class DashboardViewModel(private val app: UmbraApp) : ViewModel() {
 
     fun startWireGuard() {
         viewModelScope.launch {
-            val raw = wireGuardConfigStore.loadRaw() ?: return@launch
-            val includedApps = app.appRuleRepository.getByMode(AppMode.VPN_WIREGUARD).map { it.packageName }.toSet()
-            val routed = WireGuardConfigStore.withAppRouting(raw, includedApps, emptySet())
-            val config = WireGuardConfigStore.parse(routed)
-            wireGuardEngine.start(config)
-            app.settingsStore.setActiveMode(UmbraMode.WIREGUARD)
+            _wireGuardError.value = null
+            val raw = wireGuardConfigStore.loadRaw()
+            if (raw == null) {
+                _wireGuardError.value = "No WireGuard config saved yet — paste one on the WireGuard tab first."
+                return@launch
+            }
+            try {
+                val includedApps = app.appRuleRepository.getByMode(AppMode.VPN_WIREGUARD).map { it.packageName }.toSet()
+                val routed = WireGuardConfigStore.withAppRouting(raw, includedApps, emptySet())
+                val config = WireGuardConfigStore.parse(routed)
+                wireGuardEngine.start(config)
+                app.settingsStore.setActiveMode(UmbraMode.WIREGUARD)
+            } catch (e: Exception) {
+                _wireGuardError.value = "Failed to start WireGuard: ${e.message}"
+            }
         }
     }
 

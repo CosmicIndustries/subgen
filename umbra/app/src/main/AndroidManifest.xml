@@ -65,6 +65,24 @@
             </intent-filter>
         </receiver>
 
+        <!--
+          dev.rikka.shizuku:provider ships the ShizukuProvider *class* but,
+          unlike most Android libraries, deliberately does NOT declare it in
+          its own manifest (confirmed by decompiling the class: its
+          attachInfo() throws IllegalStateException if a host app gets
+          android:multiprocess/android:exported wrong, which only makes
+          sense if the host app is expected to declare this itself). Without
+          this, Shizuku's binder-transfer broadcast has no provider to land
+          on and Shizuku.pingBinder() never returns true — this was the bug
+          behind "doesn't detect Shizuku".
+        -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true" />
+
     </application>
 
 </manifest>
