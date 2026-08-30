@@ -12,40 +12,41 @@ import kotlinx.coroutines.flow.map
 
 private val Context.dataStore by preferencesDataStore(name = "umbra_settings")
 
-enum class UmbraMode { OFF, WIREGUARD, DPI_BYPASS }
-
-/** Non-secret app settings (retention days, active mode, start-on-boot). Secrets live in WireGuardConfigStore's encrypted prefs instead. */
+/** Non-secret app settings. Secrets (the WireGuard private key) live in WireGuardConfigStore's encrypted prefs instead. */
 class SettingsStore(private val context: Context) {
 
-    val activeMode: Flow<UmbraMode> = context.dataStore.data.map { prefs ->
-        prefs[KEY_ACTIVE_MODE]?.let { runCatching { UmbraMode.valueOf(it) }.getOrNull() } ?: UmbraMode.OFF
-    }
+    val isRunning: Flow<Boolean> = context.dataStore.data.map { prefs -> prefs[KEY_RUNNING] ?: false }
+
+    /** Set by UmbraVpnService when it fails to start (bad/missing config, establish() denied, etc.); cleared on a successful start. */
+    val lastError: Flow<String?> = context.dataStore.data.map { prefs -> prefs[KEY_LAST_ERROR] }
 
     val logRetentionDays: Flow<Int> = context.dataStore.data.map { prefs -> prefs[KEY_RETENTION_DAYS] ?: 14 }
     val startOnBootFlow: Flow<Boolean> = context.dataStore.data.map { prefs -> prefs[KEY_START_ON_BOOT] ?: false }
 
-    val byeDpiDesyncMode: Flow<String> = context.dataStore.data.map { prefs -> prefs[KEY_DPI_DESYNC_MODE] ?: "SPLIT" }
-    val byeDpiSplitPosition: Flow<String> = context.dataStore.data.map { prefs -> prefs[KEY_DPI_SPLIT_POS] ?: "2" }
-    val byeDpiFakeSni: Flow<String> = context.dataStore.data.map { prefs -> prefs[KEY_DPI_FAKE_SNI] ?: "" }
+    /** Whether WireGuard's own transport is relayed through byedpi (see WireGuardBridge.wgTurnOnViaByedpi). */
+    val byedpiWrapEnabled: Flow<Boolean> = context.dataStore.data.map { prefs -> prefs[KEY_BYEDPI_WRAP_ENABLED] ?: true }
+    val byedpiUdpFakeCount: Flow<Int> = context.dataStore.data.map { prefs -> prefs[KEY_BYEDPI_UDP_FAKE_COUNT] ?: 2 }
 
-    suspend fun setActiveMode(mode: UmbraMode) {
-        context.dataStore.edit { it[KEY_ACTIVE_MODE] = mode.name }
+    suspend fun setRunning(running: Boolean) {
+        context.dataStore.edit { it[KEY_RUNNING] = running }
+    }
+
+    suspend fun setLastError(message: String?) {
+        context.dataStore.edit {
+            if (message == null) it.remove(KEY_LAST_ERROR) else it[KEY_LAST_ERROR] = message
+        }
     }
 
     suspend fun setLogRetentionDays(days: Int) {
         context.dataStore.edit { it[KEY_RETENTION_DAYS] = days }
     }
 
-    suspend fun setByeDpiDesyncMode(mode: String) {
-        context.dataStore.edit { it[KEY_DPI_DESYNC_MODE] = mode }
+    suspend fun setByedpiWrapEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_BYEDPI_WRAP_ENABLED] = enabled }
     }
 
-    suspend fun setByeDpiSplitPosition(position: String) {
-        context.dataStore.edit { it[KEY_DPI_SPLIT_POS] = position }
-    }
-
-    suspend fun setByeDpiFakeSni(sni: String) {
-        context.dataStore.edit { it[KEY_DPI_FAKE_SNI] = sni }
+    suspend fun setByedpiUdpFakeCount(count: Int) {
+        context.dataStore.edit { it[KEY_BYEDPI_UDP_FAKE_COUNT] = count }
     }
 
     suspend fun setStartOnBoot(enabled: Boolean) {
@@ -55,11 +56,11 @@ class SettingsStore(private val context: Context) {
     suspend fun startOnBoot(): Boolean = context.dataStore.data.map { it[KEY_START_ON_BOOT] ?: false }.first()
 
     companion object {
-        private val KEY_ACTIVE_MODE = stringPreferencesKey("active_mode")
+        private val KEY_RUNNING = booleanPreferencesKey("running")
+        private val KEY_LAST_ERROR = stringPreferencesKey("last_error")
         private val KEY_RETENTION_DAYS = intPreferencesKey("log_retention_days")
         private val KEY_START_ON_BOOT = booleanPreferencesKey("start_on_boot")
-        private val KEY_DPI_DESYNC_MODE = stringPreferencesKey("dpi_desync_mode")
-        private val KEY_DPI_SPLIT_POS = stringPreferencesKey("dpi_split_position")
-        private val KEY_DPI_FAKE_SNI = stringPreferencesKey("dpi_fake_sni")
+        private val KEY_BYEDPI_WRAP_ENABLED = booleanPreferencesKey("byedpi_wrap_enabled")
+        private val KEY_BYEDPI_UDP_FAKE_COUNT = intPreferencesKey("byedpi_udp_fake_count")
     }
 }

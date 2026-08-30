@@ -5,7 +5,6 @@ import androidx.room.PrimaryKey
 
 enum class TrafficEngine {
     WIREGUARD,
-    DPI_BYPASS,
     DIRECT,
     BLOCKED,
 }

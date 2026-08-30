@@ -8,17 +8,18 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
-import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
 import com.cosmicindustries.umbra.R
 import com.cosmicindustries.umbra.data.SettingsStore
 import com.cosmicindustries.umbra.dpi.ByeDpiConfig
 import com.cosmicindustries.umbra.dpi.ByeDpiEngine
-import com.cosmicindustries.umbra.dpi.TunnelConfig
 import com.cosmicindustries.umbra.firewall.AppMode
 import com.cosmicindustries.umbra.firewall.AppRuleRepository
 import com.cosmicindustries.umbra.firewall.ShizukuFirewall
+import com.cosmicindustries.umbra.tunnel.WireGuardConfigStore
+import com.cosmicindustries.umbra.tunnel.WireGuardEngine
 import com.cosmicindustries.umbra.ui.MainActivity
+import com.wireguard.config.Config
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,129 +28,180 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
- * Owns the TUN interface for "DPI-bypass mode": apps tagged
- * [AppMode.DPI_BYPASS] get their traffic desynced by byedpi via
- * hev-socks5-tunnel (see [ByeDpiEngine]); apps tagged [AppMode.BLOCKED] are
- * hard-blocked through [ShizukuFirewall] regardless of this service's state;
- * everything else is left off the TUN and goes direct.
- *
- * This is deliberately a *different* VpnService than WireGuard mode, which
- * is driven entirely by GoBackend's own auto-managed VpnService (see
- * WireGuardEngine's kdoc for why the two can't share one TUN). Only one can
- * be the system's active VPN at a time; the dashboard enforces that as a
- * mode switch rather than the OS silently tearing one down when the other
- * starts.
+ * The single unified VpnService: one TUN, WireGuard as the tunnel for every
+ * [AppMode.VPN_WIREGUARD] app (optionally with its own transport wrapped by
+ * byedpi — see [com.cosmicindustries.umbra.tunnel.WireGuardBridge]),
+ * [AppMode.BLOCKED] apps hard-blocked via [ShizukuFirewall] independent of
+ * whether the tunnel is even running, and [AppMode.ALLOW_DIRECT] apps left
+ * off the TUN entirely. See ARCHITECTURE.md for why this replaced the
+ * earlier two-mutually-exclusive-modes design.
  */
 class UmbraVpnService : VpnService() {
 
-    private lateinit var byeDpiEngine: ByeDpiEngine
+    private val wireGuardEngine = WireGuardEngine()
+    private val byeDpiEngine = ByeDpiEngine()
+    private val shizukuFirewall = ShizukuFirewall()
     private lateinit var appRuleRepository: AppRuleRepository
     private lateinit var settingsStore: SettingsStore
-    private val shizukuFirewall = ShizukuFirewall()
+    private lateinit var wireGuardConfigStore: WireGuardConfigStore
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private var tunInterface: ParcelFileDescriptor? = null
 
     override fun onCreate() {
         super.onCreate()
-        byeDpiEngine = ByeDpiEngine(this)
         appRuleRepository = AppRuleRepository(this)
         settingsStore = SettingsStore(this)
+        wireGuardConfigStore = WireGuardConfigStore(this)
         createNotificationChannel()
-    }
-
-    private suspend fun currentByeDpiConfig(): ByeDpiConfig {
-        val mode = runCatching {
-            ByeDpiConfig.DesyncMode.valueOf(settingsStore.byeDpiDesyncMode.first())
-        }.getOrDefault(ByeDpiConfig.DesyncMode.SPLIT)
-        return ByeDpiConfig(
-            desyncMode = mode,
-            splitPosition = settingsStore.byeDpiSplitPosition.first(),
-            fakeSni = settingsStore.byeDpiFakeSni.first().ifBlank { null },
-        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            stopTunnel()
+            stopAll()
             return START_NOT_STICKY
         }
-        startForeground(NOTIFICATION_ID, buildNotification())
-        startTunnel()
+        startForeground(NOTIFICATION_ID, buildNotification(active = false))
+        startAll()
         return START_STICKY
     }
 
-    private fun startTunnel() {
+    private fun startAll() {
         scope.launch {
             appRuleRepository.sync()
-            val dpiBypassApps = appRuleRepository.getByMode(AppMode.DPI_BYPASS)
+
+            val rawConfig = wireGuardConfigStore.loadRaw()
+            if (rawConfig == null) {
+                fail("No WireGuard config saved — paste one on the WireGuard tab first.")
+                return@launch
+            }
+            val config = try {
+                WireGuardConfigStore.parse(rawConfig)
+            } catch (e: Exception) {
+                fail("Invalid WireGuard config: ${e.message}")
+                return@launch
+            }
+
+            val wireguardApps = appRuleRepository.getByMode(AppMode.VPN_WIREGUARD)
             val blockedApps = appRuleRepository.getByMode(AppMode.BLOCKED)
 
-            val builder = Builder()
-                .setSession(getString(R.string.app_name))
-                .addAddress(TunnelConfig.DEFAULT_IPV4, 24)
-                .addAddress(TunnelConfig.DEFAULT_IPV6, 64)
-                .addRoute("0.0.0.0", 0)
-                .addRoute("::", 0)
-                .addDnsServer("1.1.1.1")
-                .addDnsServer("2606:4700:4700::1111")
-                .setMtu(TunnelConfig.DEFAULT_MTU)
-                .setBlocking(false)
-
-            var includedAny = false
-            for (rule in dpiBypassApps) {
+            // Start byedpi (if wanted) before establish(): if it fails, nothing
+            // owning a TUN fd exists yet, so there's nothing to leak or unwind.
+            var byedpiAddr: String? = null
+            if (settingsStore.byedpiWrapEnabled.first()) {
+                val udpFake = settingsStore.byedpiUdpFakeCount.first()
+                val byedpiConfig = ByeDpiConfig(udpFakeCount = udpFake)
                 try {
-                    builder.addAllowedApplication(rule.packageName)
-                    includedAny = true
-                } catch (_: PackageManager.NameNotFoundException) {
-                    // App was uninstalled between sync() and now; skip it.
+                    byeDpiEngine.start(byedpiConfig)
+                    byedpiAddr = byedpiConfig.proxyAddress
+                } catch (e: Exception) {
+                    fail("byedpi failed to start: ${e.message}")
+                    return@launch
                 }
             }
-            // Never route our own process's traffic into the tunnel: byedpi's
-            // own outbound connections must go direct or we'd loop back on ourselves.
+
+            val builder = buildTun(config)
+            var includedAny = false
+            for (packageName in wireguardApps.map { it.packageName }) {
+                try {
+                    builder.addAllowedApplication(packageName)
+                    includedAny = true
+                } catch (_: PackageManager.NameNotFoundException) {
+                    // Uninstalled between sync() and now; skip it.
+                }
+            }
+            // byedpi/wireguard-go run inside our own process; never route our own traffic.
             runCatching { builder.addDisallowedApplication(packageName) }
 
             if (!includedAny) {
-                stopTunnel()
+                byeDpiEngine.stop()
+                fail("No apps are routed through WireGuard yet — set at least one app to \"WireGuard\" on the App List tab.")
                 return@launch
             }
 
             val established = builder.establish()
             if (established == null) {
-                // Another VPN (or the always-on lockdown VPN) owns the interface.
-                stopTunnel()
+                byeDpiEngine.stop()
+                fail("Android denied establishing the VPN (another VPN may already own it).")
                 return@launch
             }
-            tunInterface = established
+            // From here, WireGuardBridge owns the raw fd (mirrors upstream
+            // GoBackend's own ParcelFileDescriptor.detachFd() use, and its own
+            // error paths already close it on failure — see app/src/main/go/api.go)
+            // — this service must not also try to close it.
+            val tunFd = established.detachFd()
 
             try {
-                byeDpiEngine.start(established.fd, currentByeDpiConfig())
+                wireGuardEngine.start(
+                    interfaceName = "umbra0",
+                    tunFd = tunFd,
+                    config = config,
+                    byedpiAddr = byedpiAddr,
+                    protect = ::protect,
+                )
             } catch (e: Exception) {
-                stopTunnel()
+                byeDpiEngine.stop()
+                fail("WireGuard failed to start: ${e.message}")
                 return@launch
             }
 
             shizukuFirewall.applyAll(blockedRules = blockedApps, unblockedRules = emptyList())
+            settingsStore.setLastError(null)
+            settingsStore.setRunning(true)
             updateNotification(active = true)
         }
     }
 
-    private fun stopTunnel() {
+    /** Builds the Builder's address/route/DNS/MTU from the parsed config's own [Interface]/[Peer] blocks. */
+    private fun buildTun(config: Config): Builder {
+        val builder = Builder()
+            .setSession(getString(R.string.app_name))
+            .setMtu(config.`interface`.mtu.orElse(DEFAULT_MTU))
+            .setBlocking(false)
+
+        for (address in config.`interface`.addresses) {
+            builder.addAddress(address.address, address.mask)
+        }
+        val dnsServers = config.`interface`.dnsServers
+        if (dnsServers.isEmpty()) {
+            builder.addDnsServer("1.1.1.1")
+        } else {
+            for (dns in dnsServers) builder.addDnsServer(dns)
+        }
+        for (peer in config.peers) {
+            for (allowedIp in peer.allowedIps) {
+                builder.addRoute(allowedIp.address, allowedIp.mask)
+            }
+        }
+        return builder
+    }
+
+    private suspend fun fail(message: String) {
+        settingsStore.setLastError(message)
+        settingsStore.setRunning(false)
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun stopAll() {
+        // Tear down the native engines synchronously, not via scope.launch: onDestroy()
+        // cancels `scope` right after stopSelf(), which could cancel a launched
+        // coroutine before wgTurnOff()/jniStopProxy() ever ran, leaking the
+        // tunnel/proxy in the background. Neither call is suspend or slow (they're
+        // JNI calls, not I/O), so there's no reason to hop off this thread for them.
+        wireGuardEngine.stop()
         byeDpiEngine.stop()
-        tunInterface?.let { runCatching { it.close() } }
-        tunInterface = null
+        scope.launch { settingsStore.setRunning(false) }
         updateNotification(active = false)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     override fun onRevoke() {
-        stopTunnel()
+        stopAll()
         super.onRevoke()
     }
 
     override fun onDestroy() {
         scope.cancel()
-        tunInterface?.let { runCatching { it.close() } }
         super.onDestroy()
     }
 
@@ -164,7 +216,7 @@ class UmbraVpnService : VpnService() {
         manager.createNotificationChannel(channel)
     }
 
-    private fun buildNotification(active: Boolean = false): Notification {
+    private fun buildNotification(active: Boolean): Notification {
         val contentIntent = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -193,6 +245,7 @@ class UmbraVpnService : VpnService() {
     companion object {
         const val ACTION_START = "com.cosmicindustries.umbra.action.START"
         const val ACTION_STOP = "com.cosmicindustries.umbra.action.STOP"
+        private const val DEFAULT_MTU = 1420
         private const val NOTIFICATION_ID = 42
         private const val CHANNEL_ID = "umbra_tunnel"
     }

@@ -47,47 +47,5 @@ class WireGuardConfigStore(context: Context) {
         @Throws(BadConfigException::class)
         fun parse(rawConfigText: String): Config =
             Config.parse(BufferedReader(StringReader(rawConfigText)))
-
-        /**
-         * Rewrites the [Interface] block's `IncludedApplications` /
-         * `ExcludedApplications` lines (a wireguard-android-specific
-         * extension to the wg-quick format, applied by GoBackend's VpnService
-         * when it builds its Builder) to match the current per-app rules.
-         *
-         * Only one of the two should be non-empty: IncludedApplications is a
-         * routed-through-VPN allowlist, ExcludedApplications is a
-         * bypass-the-VPN denylist. We always emit IncludedApplications when
-         * the caller has a concrete VPN_WIREGUARD app set, since an explicit
-         * allowlist is unambiguous; pass an empty [includedPackages] with a
-         * non-empty [excludedPackages] to route everything except those.
-         */
-        fun withAppRouting(
-            rawConfigText: String,
-            includedPackages: Set<String>,
-            excludedPackages: Set<String>,
-        ): String {
-            val lines = rawConfigText.lines().toMutableList()
-            val cleaned = lines.filterNot {
-                val key = it.substringBefore('=').trim()
-                key.equals("IncludedApplications", ignoreCase = true) ||
-                    key.equals("ExcludedApplications", ignoreCase = true)
-            }.toMutableList()
-
-            val interfaceIndex = cleaned.indexOfFirst { it.trim().equals("[Interface]", ignoreCase = true) }
-            if (interfaceIndex == -1) {
-                // Malformed config; let Config.parse() surface the real error.
-                return cleaned.joinToString("\n")
-            }
-
-            val newLines = buildList {
-                if (includedPackages.isNotEmpty()) {
-                    add("IncludedApplications = ${includedPackages.joinToString(",")}")
-                } else if (excludedPackages.isNotEmpty()) {
-                    add("ExcludedApplications = ${excludedPackages.joinToString(",")}")
-                }
-            }
-            cleaned.addAll(interfaceIndex + 1, newLines)
-            return cleaned.joinToString("\n")
-        }
     }
 }

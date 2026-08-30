@@ -73,6 +73,5 @@ private fun AppRuleRow(rule: AppRule, onModeSelected: (AppMode) -> Unit) {
 private fun AppMode.label(): String = when (this) {
     AppMode.ALLOW_DIRECT -> "Direct"
     AppMode.VPN_WIREGUARD -> "WireGuard"
-    AppMode.DPI_BYPASS -> "DPI Bypass"
     AppMode.BLOCKED -> "Blocked"
 }

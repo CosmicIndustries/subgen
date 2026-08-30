@@ -1,66 +1,37 @@
 package com.cosmicindustries.umbra.dpi
 
 /**
- * Typed builder over byedpi's real CLI flags (extracted from
- * `external/byedpi/main.c`'s help text / `params.h`'s `enum demode`). Only
- * the knobs someone tuning DPI evasion actually touches are modeled;
- * anything else can go through [extraArgs] verbatim.
+ * byedpi's CLI flags (extracted from `external/byedpi/main.c`'s help
+ * text), trimmed to what's relevant for byedpi's role in this app: a
+ * local SOCKS5 (+ UDP ASSOCIATE) listener that [WireGuardEngine] wraps its
+ * own transport through (see [WireGuardBridge.wgTurnOnViaByedpi] and
+ * `app/src/main/go/socks5udpbind.go`).
  *
- * Desync strategy reference (positions use byedpi's `pos_t` mini-language:
- * `offset[:repeats:skip][+flag1[flag2]]`, e.g. "2" or "1,midsld"):
- *  - SPLIT    (-s): split the request in two writes at [splitPosition].
- *  - DISORDER (-d): split, then send the two pieces out of order.
- *  - OOB      (-o): split, send the second piece as TCP out-of-band data.
- *  - FAKE     (-f): send a bogus low-TTL packet before the real one.
+ * That's a UDP flow, so only byedpi's UDP-specific desync knob applies —
+ * `--split`/`--disorder`/`--fake`/etc. are TCP-segment-framing techniques
+ * with no meaning for a UDP relay. `-a/--udp-fake <count>` sends that many
+ * decoy datagrams ahead of each real one, the UDP analogue of byedpi's
+ * fake-packet TCP technique.
+ *
+ * byedpi defaults to accepting both SOCKS4 and SOCKS5 when no mode flag is
+ * passed (`if (!params.mode) params.mode |= (MODE_SOCKS4 | MODE_SOCKS5);`
+ * in main.c) — no explicit "--socks5" flag exists or is needed.
  */
 data class ByeDpiConfig(
     val listenIp: String = "127.0.0.1",
     val listenPort: Int = 1080,
-    val maxConnections: Int = 512,
-    val bufferSize: Int = 16384,
+    val udpFakeCount: Int = 2,
     val debugLevel: Int = 0,
-    val allowUdp: Boolean = true,
-    val resolveDomains: Boolean = true,
-    val desyncMode: DesyncMode = DesyncMode.SPLIT,
-    val splitPosition: String = "2",
-    val fakeTtl: Int = 8,
-    val fakeSni: String? = null,
-    val hostsWhitelist: String? = null,
-    val autoDesync: String? = "torst,tls,1,4",
-    val cacheTtlSeconds: Int? = 300,
-    val extraArgs: List<String> = emptyList(),
 ) {
-    enum class DesyncMode(val flag: String?) {
-        NONE(null),
-        SPLIT("-s"),
-        DISORDER("-d"),
-        OOB("-o"),
-        DISOOB("-q"),
-        FAKE("-f"),
-    }
+    val proxyAddress: String get() = "$listenIp:$listenPort"
 
     /** Renders this config as the argv byedpi's `parse_args()` expects (no argv[0]). */
     fun toArgs(): Array<String> = buildList {
         add("-i"); add(listenIp)
         add("-p"); add(listenPort.toString())
-        add("-c"); add(maxConnections.toString())
-        add("-b"); add(bufferSize.toString())
         add("-x"); add(debugLevel.toString())
-        if (!allowUdp) add("-U")
-        if (!resolveDomains) add("-N")
-
-        if (desyncMode.flag != null) {
-            add(desyncMode.flag)
-            add(splitPosition)
+        if (udpFakeCount > 0) {
+            add("-a"); add(udpFakeCount.toString())
         }
-        if (desyncMode == DesyncMode.FAKE) {
-            add("-t"); add(fakeTtl.toString())
-            fakeSni?.let { add("-n"); add(it) }
-        }
-        hostsWhitelist?.let { add("-H"); add(it) }
-        autoDesync?.let { add("-A"); add(it) }
-        cacheTtlSeconds?.let { add("-u"); add(it.toString()) }
-
-        addAll(extraArgs)
     }.toTypedArray()
 }

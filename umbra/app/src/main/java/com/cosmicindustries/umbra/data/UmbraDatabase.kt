@@ -29,7 +29,7 @@ class Converters {
 
 @Database(
     entities = [AppRule::class, ConnectionEvent::class],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -45,7 +45,16 @@ abstract class UmbraDatabase : RoomDatabase() {
                 context.applicationContext,
                 UmbraDatabase::class.java,
                 "umbra.db",
-            ).build().also { instance = it }
+            )
+                // Version 2 dropped AppMode.DPI_BYPASS (see AppRule.kt) and
+                // TrafficEngine.DPI_BYPASS (see ConnectionEvent.kt); a real
+                // migration isn't worth writing pre-release for what's
+                // still an unreleased, locally-generated debug database —
+                // destructively rebuild instead of crashing on the old
+                // enum value.
+                .fallbackToDestructiveMigration()
+                .build()
+                .also { instance = it }
         }
     }
 }

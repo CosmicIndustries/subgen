@@ -1,92 +1,110 @@
 # Architecture
 
-## Why WireGuard mode and DPI-bypass mode can't run simultaneously
+## One tunnel, three engines, running together
 
-Android allows exactly one active `VpnService`-established TUN interface
-system-wide at a time; calling `Builder.establish()` a second time (from
-any app, even the same one) tears down whatever tunnel was already up.
+Umbra owns exactly one `VpnService`/TUN interface (`vpn/UmbraVpnService`).
+Every app tagged `AppMode.VPN_WIREGUARD` is routed through the WireGuard
+tunnel; every app tagged `AppMode.BLOCKED` is hard-blocked via Shizuku
+independent of whether the tunnel is even running; everything else is left
+off the TUN and goes direct. Whether WireGuard's *own* connection to your
+VPN server is itself wrapped in byedpi's desync techniques is a single
+global toggle (`SettingsStore.byedpiWrapEnabled`), not a per-app choice —
+so all three pieces the user asked to merge are active at once, in one
+session, rather than switched between.
 
-The official WireGuard library (`com.wireguard.android:tunnel`) doesn't
-hand you a raw file descriptor to plug into your own `VpnService` — its
-`GoBackend` class owns and drives its *own* internal `android.net.VpnService`
-subclass (`GoBackend.VpnService`), merged into the manifest from the
-library's AAR. Confirmed by extracting the real
-`com.wireguard.android:tunnel` native library (`libwg-go.so`) from the
-official WireGuard Android app: its JNI entry points are hardcoded to
-`Java_com_wireguard_android_backend_GoBackend_wgTurnOn` /
-`_wgTurnOff` / etc. — meaning only `GoBackend`'s own Kotlin class can call
-them; there's no supported way to redirect wireguard-go's tunnel onto a
-file descriptor owned by a different `VpnService`.
+This wasn't the first design. The original version ran WireGuard and DPI
+bypass as two **mutually exclusive** modes, each with its own VpnService,
+because Android allows only one active VPN interface system-wide and the
+official `com.wireguard.android:tunnel` library's `GoBackend` class insists
+on driving its *own* auto-managed VpnService — confirmed by extracting the
+real `libwg-go.so` from the official WireGuard Android app: its JNI entry
+points are hardcoded to
+`Java_com_wireguard_android_backend_GoBackend_wgTurnOn` and friends, so
+only `GoBackend`'s own Kotlin/Java class could call them. That's a
+reasonable design if you actually want two independent per-app-selectable
+engines sharing one TUN — but doing that *correctly* means reading raw
+packets off the TUN yourself, asking Android which app/UID each connection
+belongs to (`ConnectivityManager.getConnectionOwnerUid`), and handing each
+packet to the right engine: a hand-rolled userspace router, which is most
+of what an app like Rethink actually is. Given the choice between that and
+"DPI-bypass wraps WireGuard's own transport instead," wrapping was chosen —
+it needs only one TUN, no packet router, and reuses byedpi's existing UDP
+fake-packet technique (`-a/--udp-fake`) for exactly the problem "a network
+detects and throttles WireGuard specifically" describes.
 
-The alternative — building `wireguard-go` from source with our own JNI
-bridge instead of depending on the published library — would let a single
-custom `VpnService` own everything, the way apps like Mullvad's do. That's
-a real, valid architecture; it was deliberately not taken here because it
-requires a Go toolchain + `gomobile bind` step this scaffold's build
-(Gradle + CMake/NDK only) doesn't set up, and because it couldn't be
-verified in an environment with no Android SDK or device to test against.
-It's the natural next step if someone wants true simultaneous
-WireGuard+DPI-bypass chaining later.
+## The Go bridge (`app/src/main/go/`)
 
-Given that constraint, Umbra exposes WireGuard and DPI-bypass as two
-mutually exclusive **modes** rather than pretending they compose:
+To make WireGuard usable inside Umbra's *own* VpnService instead of
+GoBackend's, `app/src/main/go/api.go` + `jni.c` are adapted from
+wireguard-android's own `tunnel/tools/libwg-go/{api-android.go,jni.c}`
+(read directly from its source, not guessed): same
+`wgTurnOn`/`wgTurnOff`/`wgGetSocketV4`/`wgGetSocketV6`/`wgGetConfig`/
+`wgVersion` JNI contract, just retargeted at Umbra's own
+`tunnel/WireGuardBridge.kt` class instead of `GoBackend`. `jni.c` exists
+as a separate C file because cgo's `-buildmode=c-shared` exports Go
+`string` parameters as a `{ptr,len}` struct rather than a null-terminated C
+string, and JNI's dynamic symbol resolution needs the exact
+`Java_<package>_<Class>_<method>` name regardless — cgo automatically
+compiles and links any `.c` file sitting next to a cgo-using `.go` file in
+the same package directory, which is how this needs no separate build
+step of its own.
 
-- **WireGuard mode**: `GoBackend` + its own auto-managed VpnService.
-  Per-app routing goes through wireguard-android's own config extension —
-  `IncludedApplications`/`ExcludedApplications` keys in the `[Interface]`
-  block (confirmed present in the official app's resources) — rather than
-  a Builder we control ourselves. See `tunnel/WireGuardConfigStore.kt`.
-- **DPI-bypass mode**: `vpn/UmbraVpnService`, a plain `VpnService` we do
-  own, running byedpi as a local SOCKS5 desync proxy and
-  hev-socks5-tunnel as the bridge from the TUN fd into it. Per-app routing
-  uses `Builder.addAllowedApplication`/`addDisallowedApplication` directly.
+The one real addition is `wgTurnOnViaByedpi` (api.go) +
+`socks5udpbind.go`: a custom `conn.Bind` (the interface wireguard-go uses
+for all its network I/O — verified against the real interface in
+`golang.zx2c4.com/wireguard/conn`) that relays WireGuard's UDP transport
+through byedpi's local SOCKS5 listener via RFC 1928 §7 UDP ASSOCIATE,
+instead of a plain UDP socket. This was checked against byedpi's *actual*
+UDP-associate handling (`external/byedpi/proxy.c`:
+`udp_associate()`/`on_udp_tunnel()`), not just the RFC: byedpi expects one
+UDP ASSOCIATE request naming the real destination up front and treats it
+as a fixed target, rather than accepting a different destination per
+datagram the way some SOCKS5 servers do — which is exactly what a
+single-peer WireGuard client needs anyway, so this only supports one peer
+(the common personal-VPN-client case).
 
-Apps tagged `AppMode.BLOCKED` are enforced by the Shizuku firewall path
-(`firewall/ShizukuFirewall.kt`) independent of either VPN mode, since it
-works at the OS policy level rather than by routing — that's the one piece
-that *is* always active regardless of which mode (or no mode) is running.
+`com.wireguard.config.Config` (parsing wg-quick text + `toWgUserspaceString()`,
+which produces the UAPI text `wgTurnOn`'s `settings` parameter expects) is
+still used from the `com.wireguard.android:tunnel` Maven artifact — only
+`GoBackend` itself was dropped.
 
-## Native build
+### What's actually been verified vs. not
 
-`app/src/main/cpp/CMakeLists.txt` builds two shared libraries from the
-vendored submodules in `external/`:
+The Go/C side got unusually thorough local verification for something
+built in an environment with no Android SDK or device: the *exact
+committed* `api.go` + `jni.c` + `socks5udpbind.go` were compiled and
+linked locally (Go 1.24.7 was already installed) against a real JDK
+`jni.h` and a stub `android/log.h` + a stub `liblog.so`, producing a real
+`.so` with all seven `Java_com_cosmicindustries_umbra_tunnel_WireGuardBridge_*`
+symbols present and correctly named (`nm -D` confirmed this directly).
+The SOCKS5 UDP framing (`encodeSocks5UDP`/`decodeSocks5UDP` round-trip)
+and the association handshake (`socks5UDPAssociate` against a fake SOCKS5
+server replying exactly as byedpi's real code does) were unit-tested
+during development this same way.
 
-- `libbyedpi.so`: byedpi's own sources (its CLI arg parser, desync engine,
-  event loop) compiled as-is, plus one small JNI shim
-  (`byedpi_jni.c`) that calls the same entry points byedpi's own `main()`
-  calls (`parse_args` → `init` → `run`). Because `run()` blocks, it's
-  driven from a pthread; stopping it delivers `SIGTERM` to that thread,
-  which byedpi's own `on_cancel()` handler (registered inside `run()`)
-  already turns into a clean shutdown of its listening socket — reusing
-  upstream's own tested shutdown path instead of reimplementing it.
-- `libhev-socks5-tunnel.so`: hev-socks5-tunnel's sources (plus its nested
-  `third-part/{yaml,lwip,hev-task-system}` and `src/core` submodules),
-  including its *own* upstream-provided Android JNI glue
-  (`src/hev-jni.c`) — we don't write new glue for this one, we just point
-  its `PKGNAME`/`CLSNAME` compile-time macros at our own Kotlin class
-  (`dpi/TProxyService.kt`) instead of its `hev/htproxy/TProxyService`
-  default.
+What that *doesn't* cover: the real NDK cross-compile (CI does this, not
+this local check) and, most importantly, actual end-to-end behavior on a
+real device — a real byedpi binary, a real WireGuard peer, real network
+conditions. If WireGuard connects with byedpi-wrapping off but not on,
+`socks5udpbind.go` is the first place to look; try `-a/--udp-fake 0` or
+disabling the wrap toggle entirely to isolate whether the issue is the
+relay or something else.
 
-Both were verified against the real compiled `.so` files (JNI symbol names
-via `strings`, byedpi's exact CLI flag set from its embedded help text)
-before the Kotlin/C wrappers were written, rather than guessed from
-documentation. See `NOTICE.md` for exact provenance.
+Other known-unverified pieces, carried over from earlier:
 
-## What hasn't been verified
-
-Everything above is grounded in real upstream source/binaries, but none of
-it has been compiled or run — there's no Android SDK, emulator, or device
-in the environment this was built in. The most likely rough edges on a
-first real build:
-
-- `Shizuku.newProcess(...)`'s exact signature/return type in
-  `dev.rikka.shizuku:api:13.1.5` (see `firewall/ShizukuFirewall.kt`).
-- The exact `cmd netpolicy`/`cmd appops` grammar for a full per-UID network
-  block on whatever Android version you're targeting (also
-  `ShizukuFirewall.kt`) — worth an `adb shell cmd netpolicy --help` on a
-  test device.
-- Whether byedpi's `main.c` (which references `daemon()` under `#ifdef
-  DAEMON`, an unused code path since Umbra never passes `-D`) links
-  cleanly against Android's Bionic libc without adjustment.
-- General Gradle/AGP/NDK version-compatibility issues that only show up
-  inside a real Android Studio sync.
+- `Shizuku.newProcess(...)` was found to be `private` in the real
+  `dev.rikka.shizuku:api:13.1.5` artifact (confirmed by downloading its
+  sources jar from Maven Central), so `firewall/ShizukuFirewall.kt` uses
+  `Shizuku.bindUserService()` with a custom AIDL service
+  (`firewall/IUserService.aidl` + `UserService.kt`) instead.
+- The exact `cmd netpolicy`/`cmd appops` grammar in
+  `ShizukuFirewall.kt`'s block/unblock commands for a full per-UID network
+  block — worth an `adb shell cmd netpolicy --help` on a real device.
+- `dev.rikka.shizuku:provider`'s `ShizukuProvider` needed a manual
+  `<provider>` declaration in `AndroidManifest.xml` — the library ships
+  the class but deliberately doesn't declare it itself (confirmed by
+  decompiling the class: `attachInfo()` throws `IllegalStateException` if
+  a host app gets `android:multiprocess`/`android:exported` wrong, which
+  only makes sense if the host is expected to add the provider itself).
+  Missing this was the actual bug behind "Shizuku not detected" the first
+  time this was built and tested.

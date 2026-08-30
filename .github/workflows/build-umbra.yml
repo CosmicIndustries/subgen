@@ -32,12 +32,32 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.7"
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Install NDK + CMake
         run: |
           sdkmanager --install "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - name: Build WireGuard Go bridge (all ABIs)
+        env:
+          NDK_TOOLCHAIN: /usr/local/lib/android/sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin
+        run: |
+          set -e
+          declare -A GOARCHES=( [arm64-v8a]=arm64 [armeabi-v7a]=arm [x86_64]=amd64 )
+          declare -A TARGETS=( [arm64-v8a]=aarch64-linux-android26 [armeabi-v7a]=armv7a-linux-androideabi26 [x86_64]=x86_64-linux-android26 )
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            mkdir -p "app/src/main/jniLibs/$abi"
+            CC="$NDK_TOOLCHAIN/${TARGETS[$abi]}-clang" \
+            CGO_ENABLED=1 GOOS=android GOARCH="${GOARCHES[$abi]}" \
+            go build -C app/src/main/go -buildmode=c-shared \
+              -o "$PWD/app/src/main/jniLibs/$abi/libwgbridge.so" .
+          done
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
