@@ -54,9 +54,14 @@ android {
             // Android debug keys are never used for anything but local/dev
             // installs, so committing this is the normal, documented fix.
             storeFile = file("debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+            // NOSONAR x3 below: static-analysis "hard-coded credential" rules can't tell
+            // these apart from a real secret, but "android"/"androiddebugkey" is
+            // the public, industry-standard Android debug-keystore convention
+            // (the exact values AGP itself uses for its auto-generated debug
+            // keystore) — see the comment above for why this one is committed.
+            storePassword = "android" // NOSONAR
+            keyAlias = "androiddebugkey" // NOSONAR
+            keyPassword = "android" // NOSONAR
         }
     }
 
