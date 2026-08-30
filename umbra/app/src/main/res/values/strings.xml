@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Umbra</string>
+    <string name="vpn_notification_channel">Umbra Tunnel</string>
+    <string name="vpn_notification_title">Umbra</string>
+    <string name="vpn_notification_text_idle">Tunnel stopped</string>
+    <string name="vpn_notification_text_active">DPI-bypass tunnel active</string>
+    <string name="vpn_notification_stop">Stop</string>
+</resources>
