@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.22.1)
-project(umbra_native C)
+# ASM is required for hev-task-system's per-arch context-switch routine
+# (third-part/hev-task-system/src/kern/task/hev-task-execute.S).
+project(umbra_native C ASM)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -82,7 +84,10 @@ target_include_directories(hev_lwip PRIVATE
 )
 target_compile_definitions(hev_lwip PRIVATE FD_SET_DEFINED SOCKLEN_T_DEFINED)
 
-file(GLOB_RECURSE TASK_SYSTEM_SOURCES "${HEV_DIR}/third-part/hev-task-system/src/*.c")
+file(GLOB_RECURSE TASK_SYSTEM_SOURCES
+    "${HEV_DIR}/third-part/hev-task-system/src/*.c"
+    "${HEV_DIR}/third-part/hev-task-system/src/*.S"
+)
 add_library(hev_task_system STATIC ${TASK_SYSTEM_SOURCES})
 target_include_directories(hev_task_system PRIVATE
     "${HEV_DIR}/third-part/hev-task-system/src"
