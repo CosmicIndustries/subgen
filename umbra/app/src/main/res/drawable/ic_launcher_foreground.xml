@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- A crescent: a full disc with a smaller offset disc punched out, standing in for
+         "umbra" (shadow). Kept inside the ~66dp adaptive-icon safe zone. -->
+    <path
+        android:fillColor="#6EE7B7"
+        android:fillType="evenOdd"
+        android:pathData="
+            M54,21
+            A33,33 0 1 0 54,87
+            A33,33 0 1 0 54,21
+            Z
+            M60,27
+            A27,27 0 1 1 60,81
+            A32,32 0 0 0 60,27
+            Z" />
+</vector>

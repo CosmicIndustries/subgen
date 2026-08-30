@@ -1,0 +1,18 @@
+*.iml
+.gradle/
+.idea/
+.kotlin/
+local.properties
+.DS_Store
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.keystore
+*.jks
+# Pinned debug-only signing key (app/debug.keystore) — intentionally
+# committed so every build shares one signature; see build.gradle.kts.
+!app/debug.keystore
+!gradle/wrapper/gradle-wrapper.jar

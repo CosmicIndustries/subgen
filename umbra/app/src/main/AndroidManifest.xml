@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!--
+      QR-code WireGuard config import (ui/wireguard's "Scan QR" button, via
+      zxing-android-embedded's CaptureActivity). Camera is optional — config
+      text can still be pasted or imported from a .conf/.zip file without it.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <!--
+      Umbra is a per-app firewall: it must enumerate every installed app, not
+      just ones it has an intent-based reason to see. Same requirement as
+      Rethink and ShizuWall. Fine for a sideloaded app; would need Play Console
+      justification if this were ever distributed there.
+    -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
+    <application
+        android:name=".UmbraApp"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Umbra">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Umbra"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          The actual VPN tunnel + DPI-bypass + per-app-routing engine. Runs as
+          a foreground service so Android doesn't kill it while the tunnel is
+          up (see UmbraVpnService for the "specialUse" subtype declaration).
+        -->
+        <service
+            android:name=".vpn.UmbraVpnService"
+            android:exported="true"
+            android:foregroundServiceType="specialUse"
+            android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="vpn-dpi-bypass-firewall" />
+        </service>
+
+        <receiver
+            android:name=".vpn.BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+          dev.rikka.shizuku:provider ships the ShizukuProvider *class* but,
+          unlike most Android libraries, deliberately does NOT declare it in
+          its own manifest (confirmed by decompiling the class: its
+          attachInfo() throws IllegalStateException if a host app gets
+          android:multiprocess/android:exported wrong, which only makes
+          sense if the host app is expected to declare this itself). Without
+          this, Shizuku's binder-transfer broadcast has no provider to land
+          on and Shizuku.pingBinder() never returns true — this was the bug
+          behind "doesn't detect Shizuku".
+        -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true" />
+
+    </application>
+
+</manifest>
