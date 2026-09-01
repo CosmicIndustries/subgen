@@ -302,4 +302,8 @@ func wgVersion() *C.char {
 	return C.CString("unknown")
 }
 
+// main is required for a cgo -buildmode=c-shared package to build at all, but
+// is never actually invoked: this library is only ever called into through
+// its //export'd C functions (wgTurnOn, wgTurnOnViaByedpi, etc.), never run
+// as a standalone executable.
 func main() {}

@@ -167,7 +167,7 @@ class UmbraVpnService : VpnService() {
         }
         val dnsServers = config.`interface`.dnsServers
         if (dnsServers.isEmpty()) {
-            builder.addDnsServer("1.1.1.1")
+            builder.addDnsServer(FALLBACK_DNS)
         } else {
             for (dns in dnsServers) builder.addDnsServer(dns)
         }
@@ -253,5 +253,8 @@ class UmbraVpnService : VpnService() {
         private const val DEFAULT_MTU = 1420
         private const val NOTIFICATION_ID = 42
         private const val CHANNEL_ID = "umbra_tunnel"
+
+        /** Cloudflare's public resolver, used only when the user's own WireGuard config specifies no DNS server. */
+        private const val FALLBACK_DNS = "1.1.1.1"
     }
 }

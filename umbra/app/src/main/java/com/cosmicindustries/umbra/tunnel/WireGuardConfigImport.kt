@@ -33,14 +33,22 @@ object WireGuardConfigImport {
     private const val MAX_ZIP_ENTRIES = 256
 
     fun read(resolver: ContentResolver, uri: Uri): Result {
-        val bytes = try {
-            resolver.openInputStream(uri)?.use { readBounded(it, MAX_INPUT_BYTES) }
-                ?: return Result.Error("Could not open the selected file")
+        // Two distinct failure modes were previously collapsed into one null via
+        // ?.use{} ?: — "couldn't open" and "too large" both flattened to null, so
+        // the too-large branch below was unreachable dead code (Sonar caught
+        // this as a "useless null check that always fails"). Kept separate here.
+        val stream = try {
+            resolver.openInputStream(uri) ?: return Result.Error("Could not open the selected file")
         } catch (e: Exception) {
             return Result.Error("Could not read the selected file: ${e.message}")
         }
 
-        if (bytes == null) return Result.Error("Selected file is too large (over ${MAX_INPUT_BYTES / 1024 / 1024} MiB)")
+        val bytes = try {
+            stream.use { readBounded(it, MAX_INPUT_BYTES) }
+        } catch (e: Exception) {
+            return Result.Error("Could not read the selected file: ${e.message}")
+        } ?: return Result.Error("Selected file is too large (over ${MAX_INPUT_BYTES / 1024 / 1024} MiB)")
+
         if (bytes.isEmpty()) return Result.Error("Selected file is empty")
 
         return if (bytes.size >= 4 && bytes.copyOfRange(0, 4).contentEquals(ZIP_MAGIC)) {

@@ -106,37 +106,52 @@ data class ByeDpiConfig(
          * Shell-like tokenizer: splits on unquoted whitespace, honors single/double
          * quotes and backslash escapes (matching what a user pasting a byedpi
          * command line from a terminal or the README would expect), without
-         * pulling in a full shell grammar this app has no other use for.
+         * pulling in a full shell grammar this app has no other use for. Split
+         * across a small state holder (rather than one function with a deeply
+         * nested `when`) to keep each piece's branching simple on its own.
          */
         internal fun tokenize(input: String): List<String> {
-            val tokens = mutableListOf<String>()
-            val current = StringBuilder()
-            var inToken = false
-            var quote: Char? = null
+            val state = TokenizerState()
             var i = 0
             while (i < input.length) {
-                val c = input[i]
-                when {
-                    quote != null -> {
-                        if (c == '\\' && quote == '"' && i + 1 < input.length) {
-                            current.append(input[i + 1]); i++
-                        } else if (c == quote) {
-                            quote = null
-                        } else {
-                            current.append(c)
-                        }
-                    }
-                    c == '\'' || c == '"' -> { quote = c; inToken = true }
-                    c == '\\' && i + 1 < input.length -> { current.append(input[i + 1]); i++; inToken = true }
-                    c.isWhitespace() -> {
-                        if (inToken) { tokens += current.toString(); current.clear(); inToken = false }
-                    }
-                    else -> { current.append(c); inToken = true }
-                }
-                i++
+                i = state.consume(input, i)
             }
-            if (inToken || current.isNotEmpty()) tokens += current.toString()
-            return tokens
+            state.flush()
+            return state.tokens
+        }
+
+        private class TokenizerState {
+            val tokens = mutableListOf<String>()
+            private val current = StringBuilder()
+            private var inToken = false
+            private var quote: Char? = null
+
+            /** Consumes the character at [i], returning the index to resume from. */
+            fun consume(input: String, i: Int): Int {
+                val c = input[i]
+                val openQuote = quote
+                return when {
+                    openQuote != null -> consumeQuoted(input, i, c, openQuote)
+                    c == '\'' || c == '"' -> { quote = c; inToken = true; i + 1 }
+                    c == '\\' && i + 1 < input.length -> { current.append(input[i + 1]); inToken = true; i + 2 }
+                    c.isWhitespace() -> { endToken(); i + 1 }
+                    else -> { current.append(c); inToken = true; i + 1 }
+                }
+            }
+
+            private fun consumeQuoted(input: String, i: Int, c: Char, openQuote: Char): Int = when {
+                c == '\\' && openQuote == '"' && i + 1 < input.length -> { current.append(input[i + 1]); i + 2 }
+                c == openQuote -> { quote = null; i + 1 }
+                else -> { current.append(c); i + 1 }
+            }
+
+            private fun endToken() {
+                if (inToken) { tokens += current.toString(); current.clear(); inToken = false }
+            }
+
+            fun flush() {
+                if (inToken || current.isNotEmpty()) tokens += current.toString()
+            }
         }
     }
 }
