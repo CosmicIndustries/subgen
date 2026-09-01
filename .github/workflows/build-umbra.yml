@@ -67,8 +67,14 @@ jobs:
       # version of their own choosing. Regenerating the lockfile from the
       # real, network-connected resolution on every run keeps it honest —
       # a stale committed lockfile would just be a false sense of security.
+      #
+      # Must target :app explicitly: the bare `dependencies` task only runs
+      # for the project in scope, and the root project has no dependency
+      # configurations of its own ("No configurations" in its own report) —
+      # every real dependency lives on :app, confirmed by running this
+      # unqualified first and finding it silently locked nothing there.
       - name: Generate dependency locks
-        run: ./gradlew dependencies --write-locks
+        run: ./gradlew :app:dependencies --write-locks
 
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
