@@ -30,6 +30,10 @@ class SettingsStore(private val context: Context) {
     val byedpiFakeTtl: Flow<Int> = context.dataStore.data.map { prefs -> prefs[KEY_BYEDPI_FAKE_TTL] ?: 8 }
     /** Overrides byedpi's decoy payload (`-l/--fake-data`); blank keeps byedpi's own built-in default. */
     val byedpiCustomFakeData: Flow<String> = context.dataStore.data.map { prefs -> prefs[KEY_BYEDPI_CUSTOM_FAKE_DATA] ?: "" }
+    /** True: use [byedpiRawArgs] verbatim instead of the structured fields above. */
+    val byedpiScriptMode: Flow<Boolean> = context.dataStore.data.map { prefs -> prefs[KEY_BYEDPI_SCRIPT_MODE] ?: false }
+    /** Full byedpi CLI arguments, user-supplied; see ByeDpiConfig's "Script mode" doc. */
+    val byedpiRawArgs: Flow<String> = context.dataStore.data.map { prefs -> prefs[KEY_BYEDPI_RAW_ARGS] ?: "" }
 
     suspend fun setRunning(running: Boolean) {
         context.dataStore.edit { it[KEY_RUNNING] = running }
@@ -61,6 +65,14 @@ class SettingsStore(private val context: Context) {
         context.dataStore.edit { it[KEY_BYEDPI_CUSTOM_FAKE_DATA] = data }
     }
 
+    suspend fun setByedpiScriptMode(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_BYEDPI_SCRIPT_MODE] = enabled }
+    }
+
+    suspend fun setByedpiRawArgs(args: String) {
+        context.dataStore.edit { it[KEY_BYEDPI_RAW_ARGS] = args }
+    }
+
     suspend fun setStartOnBoot(enabled: Boolean) {
         context.dataStore.edit { it[KEY_START_ON_BOOT] = enabled }
     }
@@ -76,5 +88,7 @@ class SettingsStore(private val context: Context) {
         private val KEY_BYEDPI_UDP_FAKE_COUNT = intPreferencesKey("byedpi_udp_fake_count")
         private val KEY_BYEDPI_FAKE_TTL = intPreferencesKey("byedpi_fake_ttl")
         private val KEY_BYEDPI_CUSTOM_FAKE_DATA = stringPreferencesKey("byedpi_custom_fake_data")
+        private val KEY_BYEDPI_SCRIPT_MODE = booleanPreferencesKey("byedpi_script_mode")
+        private val KEY_BYEDPI_RAW_ARGS = stringPreferencesKey("byedpi_raw_args")
     }
 }

@@ -91,6 +91,8 @@ class UmbraVpnService : VpnService() {
                     udpFakeCount = settingsStore.byedpiUdpFakeCount.first(),
                     fakeTtl = settingsStore.byedpiFakeTtl.first(),
                     customFakeData = settingsStore.byedpiCustomFakeData.first(),
+                    scriptMode = settingsStore.byedpiScriptMode.first(),
+                    rawArgs = settingsStore.byedpiRawArgs.first(),
                 )
                 try {
                     byeDpiEngine.start(byedpiConfig)

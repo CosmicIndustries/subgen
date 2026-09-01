@@ -143,5 +143,17 @@ exposes the parts of byedpi's config that actually affect a UDP relay
   byedpi's built-in decoy bytes. Leave blank unless you have a specific
   reason to change it.
 
+Flip **Advanced: full byedpi script** to replace all of the above with a
+raw text field accepting byedpi's *entire* CLI surface — anything from its
+own README (`--split`, `--disorder`, `--auto`, `--fake-sni`, etc.), tokenized
+the way a shell would split it (quotes and backslash escapes both work).
+Umbra doesn't validate the content; byedpi's own argument parser does. The
+one thing it can't change is the listen address — any `-i`/`-p` in the
+script is dropped, since Umbra's own SOCKS5 client always connects to a
+fixed local address.
+
+Nothing in the DPI Bypass tab takes effect until you press **Save** —
+editing the sliders or the script field no longer writes on every change.
+
 This targets networks that specifically detect and block/throttle
 WireGuard's own traffic pattern, not general website blocking.
