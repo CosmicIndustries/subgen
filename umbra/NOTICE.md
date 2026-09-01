@@ -24,6 +24,20 @@ as-is and links a small amount of Umbra-authored glue
 relays WireGuard's transport through byedpi) is new code written for this
 project, not adapted from either upstream.
 
+## Bundled data (`app/src/main/assets/`)
+
+| Project | License | Used for |
+|---|---|---|
+| [Universal Android Debloater Next Generation](https://github.com/Universal-Debloater-Alliance/universal-android-debloater-next-generation) (`resources/assets/uad_lists.json`) | GPL-3.0 | Source for `assets/debloat_packages.json`'s package-name → risk-tier ("Recommended"/"Advanced"/"Expert") mapping, used by the App List screen's bulk debloat-block presets (`firewall/DebloatList.kt`) |
+
+Only that project's bare package identifiers and their single-word removal-risk tier are
+extracted into `debloat_packages.json` — none of `uad_lists.json`'s per-package descriptive
+text, dependency graph, or labels are reproduced, so nothing beyond a factual
+package-name/tier mapping from that GPL-3.0 project is redistributed here. The "Unsafe"
+tier (packages UAD-ng itself warns can bootloop a device) is excluded entirely; only
+Recommended/Advanced/Expert are bundled and only ever applied as a bulk *block this app's
+network access* action, never an actual package removal.
+
 ## Maven dependencies
 
 | Project | License | Used for |

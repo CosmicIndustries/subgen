@@ -18,6 +18,9 @@ interface AppRuleDao {
     @Query("SELECT * FROM app_rules WHERE packageName = :packageName")
     suspend fun get(packageName: String): AppRule?
 
+    @Query("SELECT packageName FROM app_rules")
+    suspend fun getAllPackageNames(): List<String>
+
     @Upsert
     suspend fun upsert(rule: AppRule)
 
@@ -26,6 +29,9 @@ interface AppRuleDao {
 
     @Query("UPDATE app_rules SET mode = :mode, updatedAtMillis = :updatedAtMillis WHERE packageName = :packageName")
     suspend fun setMode(packageName: String, mode: AppMode, updatedAtMillis: Long)
+
+    @Query("UPDATE app_rules SET mode = :mode, updatedAtMillis = :updatedAtMillis WHERE packageName IN (:packageNames)")
+    suspend fun setModeForPackages(packageNames: List<String>, mode: AppMode, updatedAtMillis: Long)
 
     @Query("DELETE FROM app_rules WHERE packageName NOT IN (:installedPackages)")
     suspend fun pruneUninstalled(installedPackages: List<String>)

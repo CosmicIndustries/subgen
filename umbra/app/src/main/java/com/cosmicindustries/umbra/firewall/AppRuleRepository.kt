@@ -25,6 +25,26 @@ class AppRuleRepository(context: Context) {
         dao.setMode(packageName, mode, System.currentTimeMillis())
     }
 
+    /**
+     * Blocks every currently-installed app whose package is in UAD-ng's debloat list at or
+     * below [tier] (see [DebloatList]) — apps not on that list are left exactly as they are.
+     * Additive only: never un-blocks or downgrades a rule the user (or an earlier preset)
+     * already set, so applying [DebloatTier.ADVANCED] after [DebloatTier.RECOMMENDED] only
+     * adds newly-covered packages rather than touching ones already handled.
+     *
+     * Chunked at 500 packages per UPDATE to stay well under SQLite's default bound on the
+     * number of host parameters in a single statement (a single `WHERE ... IN (:list)` with
+     * all ~3000 "Recommended"-tier packages at once would risk exceeding it).
+     */
+    suspend fun applyDebloatPreset(tier: DebloatTier) {
+        val targets = DebloatList.packagesUpTo(appContext, tier)
+        if (targets.isEmpty()) return
+        val toBlock = dao.getAllPackageNames().filter { it in targets }
+        if (toBlock.isEmpty()) return
+        val now = System.currentTimeMillis()
+        toBlock.chunked(500).forEach { chunk -> dao.setModeForPackages(chunk, AppMode.BLOCKED, now) }
+    }
+
     /** Re-scans installed apps: adds any new ones as [AppMode.ALLOW_DIRECT], prunes uninstalled ones. */
     suspend fun sync() {
         val installed = packageManager.getInstalledApplications(PackageManager.GET_META_DATA)

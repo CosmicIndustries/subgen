@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.cosmicindustries.umbra.UmbraApp
 import com.cosmicindustries.umbra.firewall.AppMode
 import com.cosmicindustries.umbra.firewall.AppRule
+import com.cosmicindustries.umbra.firewall.DebloatTier
 import com.cosmicindustries.umbra.ui.SimpleViewModelFactory
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +19,11 @@ class AppListViewModel(private val app: UmbraApp) : ViewModel() {
 
     fun setMode(packageName: String, mode: AppMode) {
         viewModelScope.launch { app.appRuleRepository.setMode(packageName, mode) }
+    }
+
+    /** Bulk-blocks known bloat/telemetry packages at or below [tier] — see [DebloatTier]. */
+    fun applyDebloatPreset(tier: DebloatTier) {
+        viewModelScope.launch { app.appRuleRepository.applyDebloatPreset(tier) }
     }
 
     fun refresh() {
