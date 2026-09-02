@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.cosmicindustries.umbra.R
 import com.cosmicindustries.umbra.data.SettingsStore
@@ -67,9 +68,13 @@ class UmbraVpnService : VpnService() {
 
     private fun startAll() {
         scope.launch {
+            Log.d(TAG, "startAll: syncing installed apps")
             appRuleRepository.sync()
             when (val outcome = prepareLaunch()) {
-                is LaunchOutcome.Failed -> fail(outcome.message)
+                is LaunchOutcome.Failed -> {
+                    Log.w(TAG, "startAll: prepareLaunch failed: ${outcome.message}")
+                    fail(outcome.message)
+                }
                 is LaunchOutcome.Ready -> finishLaunch(outcome)
             }
         }
@@ -82,6 +87,7 @@ class UmbraVpnService : VpnService() {
             val byedpiAddr: String?,
             val builder: Builder,
             val blockedApps: List<AppRule>,
+            val unblockedApps: List<AppRule>,
         ) : LaunchOutcome
         data class Failed(val message: String) : LaunchOutcome
     }
@@ -97,7 +103,13 @@ class UmbraVpnService : VpnService() {
         }
 
         val wireguardApps = appRuleRepository.getByMode(AppMode.VPN_WIREGUARD)
+        val directApps = appRuleRepository.getByMode(AppMode.ALLOW_DIRECT)
         val blockedApps = appRuleRepository.getByMode(AppMode.BLOCKED)
+        Log.d(
+            TAG,
+            "prepareLaunch: ${wireguardApps.size} WireGuard app(s), ${directApps.size} direct, " +
+                "${blockedApps.size} blocked",
+        )
 
         // Start byedpi (if wanted) before establish(): if it fails, nothing
         // owning a TUN fd exists yet, so there's nothing to leak or unwind.
@@ -111,6 +123,7 @@ class UmbraVpnService : VpnService() {
             )
             try {
                 byeDpiEngine.start(byedpiConfig)
+                Log.d(TAG, "prepareLaunch: byedpi started at ${byedpiConfig.proxyAddress}")
             } catch (e: Exception) {
                 return LaunchOutcome.Failed("byedpi failed to start: ${e.message}")
             }
@@ -121,8 +134,13 @@ class UmbraVpnService : VpnService() {
 
         val builder = buildTun(config)
         val includedAny = includeWireGuardApps(builder, wireguardApps)
-        // byedpi/wireguard-go run inside our own process; never route our own traffic.
-        runCatching { builder.addDisallowedApplication(packageName) }
+        // Umbra's own traffic (this process's UID) is never explicitly excluded here:
+        // Android's VpnService.Builder forbids mixing addAllowedApplication with
+        // addDisallowedApplication on the same instance — once includeWireGuardApps() above
+        // has added at least one app, the Builder is in allow-list mode and a later
+        // addDisallowedApplication call would just throw. Allow-list semantics alone already
+        // keep every non-listed app, Umbra included, off the tunnel; WireGuardEngine's own
+        // protect() calls are the belt-and-suspenders for WireGuard's specific outbound socket.
 
         if (!includedAny) {
             byeDpiEngine.stop()
@@ -130,7 +148,7 @@ class UmbraVpnService : VpnService() {
                 "No apps are routed through WireGuard yet — set at least one app to \"WireGuard\" on the App List tab.",
             )
         }
-        return LaunchOutcome.Ready(config, byedpiAddr, builder, blockedApps)
+        return LaunchOutcome.Ready(config, byedpiAddr, builder, blockedApps, directApps + wireguardApps)
     }
 
     /** Adds each still-installed app to [builder]'s allow-list; returns whether at least one was added. */
@@ -140,8 +158,9 @@ class UmbraVpnService : VpnService() {
             try {
                 builder.addAllowedApplication(packageName)
                 includedAny = true
-            } catch (_: PackageManager.NameNotFoundException) {
-                // Uninstalled between sync() and now; skip it.
+                Log.d(TAG, "includeWireGuardApps: added $packageName")
+            } catch (e: PackageManager.NameNotFoundException) {
+                Log.w(TAG, "includeWireGuardApps: $packageName not found (uninstalled?): ${e.message}")
             }
         }
         return includedAny
@@ -151,6 +170,7 @@ class UmbraVpnService : VpnService() {
     private suspend fun finishLaunch(outcome: LaunchOutcome.Ready) {
         val established = outcome.builder.establish()
         if (established == null) {
+            Log.w(TAG, "finishLaunch: Builder.establish() returned null")
             byeDpiEngine.stop()
             fail("Android denied establishing the VPN (another VPN may already own it).")
             return
@@ -169,13 +189,26 @@ class UmbraVpnService : VpnService() {
                 byedpiAddr = outcome.byedpiAddr,
                 protect = ::protect,
             )
+            Log.d(TAG, "finishLaunch: WireGuard tunnel up")
         } catch (e: Exception) {
+            Log.w(TAG, "finishLaunch: WireGuard failed to start", e)
             byeDpiEngine.stop()
             fail("WireGuard failed to start: ${e.message}")
             return
         }
 
-        shizukuFirewall.applyAll(blockedRules = outcome.blockedApps, unblockedRules = emptyList())
+        // Every app not currently AppMode.BLOCKED is passed as unblockedRules, not just the
+        // ones this launch is actively routing — otherwise an app blocked in an earlier
+        // session (or by a debloat preset) whose mode was later changed away from BLOCKED
+        // would stay firewalled at the OS level forever, since nothing else in this codebase
+        // ever calls ShizukuFirewall.unblock() for it. unblockCommandsFor()'s commands are
+        // idempotent, so re-unblocking an already-unblocked app is a harmless no-op.
+        Log.d(
+            TAG,
+            "finishLaunch: applying Shizuku firewall — ${outcome.blockedApps.size} blocked, " +
+                "${outcome.unblockedApps.size} unblocked",
+        )
+        shizukuFirewall.applyAll(blockedRules = outcome.blockedApps, unblockedRules = outcome.unblockedApps)
         settingsStore.setLastError(null)
         settingsStore.setRunning(true)
         updateNotification(active = true)
@@ -206,6 +239,7 @@ class UmbraVpnService : VpnService() {
     }
 
     private suspend fun fail(message: String) {
+        Log.w(TAG, "fail: $message")
         settingsStore.setLastError(message)
         settingsStore.setRunning(false)
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -213,6 +247,7 @@ class UmbraVpnService : VpnService() {
     }
 
     private fun stopAll() {
+        Log.d(TAG, "stopAll")
         // Tear down the native engines synchronously, not via scope.launch: onDestroy()
         // cancels `scope` right after stopSelf(), which could cancel a launched
         // coroutine before wgTurnOff()/jniStopProxy() ever ran, leaking the
@@ -274,6 +309,7 @@ class UmbraVpnService : VpnService() {
     }
 
     companion object {
+        private const val TAG = "Umbra/VpnService"
         const val ACTION_START = "com.cosmicindustries.umbra.action.START"
         const val ACTION_STOP = "com.cosmicindustries.umbra.action.STOP"
         private const val DEFAULT_MTU = 1420
