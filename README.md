@@ -1,6 +1,6 @@
-# Umbra
+# <img src=".github/assets/icon.svg" width="36" height="36" valign="middle"> Umbra
 
-[![Platform](https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white)](https://developer.android.com)
+<img src=".github/assets/icon.svg" width="20" height="20" valign="middle"> [![Platform](https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white)](https://developer.android.com)
 [![Language](https://img.shields.io/badge/language-Kotlin-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](NOTICE.md)
 [![Status](https://img.shields.io/badge/status-active_development-orange)](../../pulls)
