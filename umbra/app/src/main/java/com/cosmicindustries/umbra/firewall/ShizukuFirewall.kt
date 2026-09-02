@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.ServiceConnection
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import com.cosmicindustries.umbra.BuildConfig
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
@@ -54,6 +55,10 @@ import rikka.shizuku.Shizuku
  */
 class ShizukuFirewall {
 
+    companion object {
+        private const val TAG = "Umbra/Shizuku"
+    }
+
     private val userServiceArgs = Shizuku.UserServiceArgs(
         ComponentName(BuildConfig.APPLICATION_ID, UserService::class.java.name),
     )
@@ -68,11 +73,16 @@ class ShizukuFirewall {
     private val supportsConnectivityChain: Boolean
         get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
-    suspend fun block(rule: AppRule): Boolean = runPrivileged(blockCommandsFor(rule))
+    suspend fun block(rule: AppRule): Boolean = runPrivileged(blockCommandsFor(rule)).also {
+        Log.d(TAG, "block(${rule.packageName}): ${if (it) "ok" else "FAILED"}")
+    }
 
-    suspend fun unblock(rule: AppRule): Boolean = runPrivileged(unblockCommandsFor(rule))
+    suspend fun unblock(rule: AppRule): Boolean = runPrivileged(unblockCommandsFor(rule)).also {
+        Log.d(TAG, "unblock(${rule.packageName}): ${if (it) "ok" else "FAILED"}")
+    }
 
     suspend fun applyAll(blockedRules: List<AppRule>, unblockedRules: List<AppRule>) {
+        Log.d(TAG, "applyAll: ${blockedRules.size} to block, ${unblockedRules.size} to unblock")
         if (supportsConnectivityChain) {
             setChain3Enabled(blockedRules.isNotEmpty())
         }
@@ -85,6 +95,8 @@ class ShizukuFirewall {
         if (chain3Enabled == enabled) return
         if (runShizukuCommand(listOf("cmd", "connectivity", "set-chain3-enabled", enabled.toString()))) {
             chain3Enabled = enabled
+        } else {
+            Log.w(TAG, "setChain3Enabled($enabled): command failed")
         }
     }
 
@@ -112,10 +124,16 @@ class ShizukuFirewall {
         commands.all { cmd -> runShizukuCommand(cmd) }
     }
 
-    private suspend fun runShizukuCommand(cmd: List<String>): Boolean = try {
-        getService().exec(cmd.toTypedArray()) == 0
-    } catch (e: Exception) {
-        false
+    private suspend fun runShizukuCommand(cmd: List<String>): Boolean {
+        val cmdStr = cmd.joinToString(" ")
+        return try {
+            val exitCode = getService().exec(cmd.toTypedArray())
+            Log.d(TAG, "exec: $cmdStr -> exit $exitCode")
+            exitCode == 0
+        } catch (e: Exception) {
+            Log.w(TAG, "exec: $cmdStr -> threw", e)
+            false
+        }
     }
 
     private suspend fun getService(): IUserService {
