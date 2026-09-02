@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
+  <!--
+    Faithful reproduction of the real launcher icon's two adaptive-icon layers
+    (app/src/main/res/drawable/ic_launcher_background.xml + ic_launcher_foreground.xml
+    on the app's development branch) as a single standalone SVG for README display —
+    same fill colors and path data, just combined and circle-clipped the way Android's
+    launcher masks an adaptive icon at runtime.
+  -->
+  <defs>
+    <clipPath id="mask">
+      <circle cx="54" cy="54" r="54" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#mask)">
+    <path fill="#0B0F14" d="M0,0h108v108h-108z" />
+    <path
+      fill="#6EE7B7"
+      fill-rule="evenodd"
+      d="M54,21 A33,33 0 1 0 54,87 A33,33 0 1 0 54,21 Z M60,27 A27,27 0 1 1 60,81 A32,32 0 0 0 60,27 Z"
+    />
+  </g>
+</svg>
