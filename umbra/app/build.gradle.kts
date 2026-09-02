@@ -104,6 +104,24 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }
 
+// Every dependency version in gradle/libs.versions.toml is already an exact
+// pin, not a range — but that alone doesn't cover transitive dependencies
+// pulled in without a version of their own choosing. Locking makes the full
+// resolved graph (transitives included) explicit and reproducible: CI
+// regenerates gradle.lockfile on every push (see build-umbra.yml's "Generate
+// dependency locks" + "Commit updated lockfile" steps) and a build fails
+// loudly if resolution would otherwise pick something different from what's
+// committed. Declared here rather than via `allprojects{}` on the root
+// project: :app is the only module with any real dependencies to lock — the
+// root project has zero configurations of its own (confirmed by CI: running
+// the bare `dependencies` task there reports "No configurations" and writes
+// nothing), so a root-level declaration just left Sonar's dependency-lock
+// check flagging a build.gradle.kts that could never have a matching
+// lockfile next to it.
+dependencyLocking {
+    lockAllConfigurations()
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

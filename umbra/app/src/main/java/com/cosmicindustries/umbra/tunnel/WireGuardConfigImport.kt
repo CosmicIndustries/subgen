@@ -43,11 +43,17 @@ object WireGuardConfigImport {
             return Result.Error("Could not read the selected file: ${e.message}")
         }
 
+        // NOSONAR: Sonar claims this elvis "always succeeds" (dead code), but that's
+        // wrong — verified directly with a real kotlinc: the try-expression's type
+        // stays ByteArray? (the catch branch's `return` is Nothing, which doesn't
+        // widen the try block's own nullable type back to non-null), and a build
+        // that actually returns null from readBounded() genuinely takes this branch.
+        // Removing it would turn a real "file too large" case into an NPE instead.
         val bytes = try {
             stream.use { readBounded(it, MAX_INPUT_BYTES) }
         } catch (e: Exception) {
             return Result.Error("Could not read the selected file: ${e.message}")
-        } ?: return Result.Error("Selected file is too large (over ${MAX_INPUT_BYTES / 1024 / 1024} MiB)")
+        } ?: return Result.Error("Selected file is too large (over ${MAX_INPUT_BYTES / 1024 / 1024} MiB)") // NOSONAR
 
         if (bytes.isEmpty()) return Result.Error("Selected file is empty")
 

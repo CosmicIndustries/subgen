@@ -132,38 +132,16 @@ func turnOn(interfaceName string, tunFd int32, settings string, bind conn.Bind) 
 	logger.Verbosef("Attaching to interface %v", name)
 	dev := device.NewDevice(tunDevice, bind, logger)
 
-	err = dev.IpcSet(settings)
-	if err != nil {
+	if err := dev.IpcSet(settings); err != nil {
 		unix.Close(int(tunFd))
 		logger.Errorf("IpcSet: %v", err)
 		return -1
 	}
 	dev.DisableSomeRoamingForBrokenMobileSemantics()
 
-	var uapi net.Listener
-	uapiFile, err := ipc.UAPIOpen(name)
-	if err != nil {
-		logger.Errorf("UAPIOpen: %v", err)
-	} else {
-		uapi, err = ipc.UAPIListen(name, uapiFile)
-		if err != nil {
-			uapiFile.Close()
-			logger.Errorf("UAPIListen: %v", err)
-		} else {
-			go func() {
-				for {
-					c, err := uapi.Accept()
-					if err != nil {
-						return
-					}
-					go dev.IpcHandle(c)
-				}
-			}()
-		}
-	}
+	uapi, uapiFile := setupUAPI(name, dev, logger)
 
-	err = dev.Up()
-	if err != nil {
+	if err := dev.Up(); err != nil {
 		logger.Errorf("Unable to bring up device: %v", err)
 		if uapiFile != nil {
 			uapiFile.Close()
@@ -173,13 +151,8 @@ func turnOn(interfaceName string, tunFd int32, settings string, bind conn.Bind) 
 	}
 	logger.Verbosef("Device started")
 
-	var i int32
-	for i = 0; i < math.MaxInt32; i++ {
-		if _, exists := tunnelHandles[i]; !exists {
-			break
-		}
-	}
-	if i == math.MaxInt32 {
+	handle, ok := allocateHandle()
+	if !ok {
 		logger.Errorf("Unable to find empty handle")
 		if uapiFile != nil {
 			uapiFile.Close()
@@ -187,8 +160,50 @@ func turnOn(interfaceName string, tunFd int32, settings string, bind conn.Bind) 
 		dev.Close()
 		return -1
 	}
-	tunnelHandles[i] = TunnelHandle{device: dev, uapi: uapi}
-	return i
+	tunnelHandles[handle] = TunnelHandle{device: dev, uapi: uapi}
+	return handle
+}
+
+// setupUAPI opens and starts serving the UAPI socket for name, logging (but
+// not aborting turnOn on) any failure — the tunnel still works without it,
+// just without external `wg` CLI/UAPI introspection. Preserves the original
+// inline logic's exact behavior on a UAPIListen failure: uapiFile comes back
+// already closed but still non-nil, since the caller's own cleanup paths
+// guard every uapiFile.Close() with a nil check.
+func setupUAPI(name string, dev *device.Device, logger *device.Logger) (net.Listener, *os.File) {
+	uapiFile, err := ipc.UAPIOpen(name)
+	if err != nil {
+		logger.Errorf("UAPIOpen: %v", err)
+		return nil, uapiFile
+	}
+	uapi, err := ipc.UAPIListen(name, uapiFile)
+	if err != nil {
+		uapiFile.Close()
+		logger.Errorf("UAPIListen: %v", err)
+		return nil, uapiFile
+	}
+	go func() {
+		for {
+			c, err := uapi.Accept()
+			if err != nil {
+				return
+			}
+			go dev.IpcHandle(c)
+		}
+	}()
+	return uapi, uapiFile
+}
+
+// allocateHandle returns the lowest unused tunnelHandles key, or ok=false if
+// none is free (practically unreachable — math.MaxInt32 concurrent tunnels).
+func allocateHandle() (int32, bool) {
+	var i int32
+	for i = 0; i < math.MaxInt32; i++ {
+		if _, exists := tunnelHandles[i]; !exists {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 //export wgTurnOn
@@ -302,8 +317,9 @@ func wgVersion() *C.char {
 	return C.CString("unknown")
 }
 
-// main is required for a cgo -buildmode=c-shared package to build at all, but
-// is never actually invoked: this library is only ever called into through
-// its //export'd C functions (wgTurnOn, wgTurnOnViaByedpi, etc.), never run
-// as a standalone executable.
-func main() {}
+func main() {
+	// Required for a cgo -buildmode=c-shared package to build at all, but
+	// never actually invoked: this library is only ever called into through
+	// its //export'd C functions (wgTurnOn, wgTurnOnViaByedpi, etc.), never
+	// run as a standalone executable.
+}
