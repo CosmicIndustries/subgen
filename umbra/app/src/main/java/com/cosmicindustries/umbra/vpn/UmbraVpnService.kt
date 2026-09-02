@@ -14,6 +14,7 @@ import com.cosmicindustries.umbra.data.SettingsStore
 import com.cosmicindustries.umbra.dpi.ByeDpiConfig
 import com.cosmicindustries.umbra.dpi.ByeDpiEngine
 import com.cosmicindustries.umbra.firewall.AppMode
+import com.cosmicindustries.umbra.firewall.AppRule
 import com.cosmicindustries.umbra.firewall.AppRuleRepository
 import com.cosmicindustries.umbra.firewall.ShizukuFirewall
 import com.cosmicindustries.umbra.tunnel.WireGuardConfigStore
@@ -67,92 +68,117 @@ class UmbraVpnService : VpnService() {
     private fun startAll() {
         scope.launch {
             appRuleRepository.sync()
-
-            val rawConfig = wireGuardConfigStore.loadRaw()
-            if (rawConfig == null) {
-                fail("No WireGuard config saved — paste one on the WireGuard tab first.")
-                return@launch
+            when (val outcome = prepareLaunch()) {
+                is LaunchOutcome.Failed -> fail(outcome.message)
+                is LaunchOutcome.Ready -> finishLaunch(outcome)
             }
-            val config = try {
-                WireGuardConfigStore.parse(rawConfig)
-            } catch (e: Exception) {
-                fail("Invalid WireGuard config: ${e.message}")
-                return@launch
-            }
-
-            val wireguardApps = appRuleRepository.getByMode(AppMode.VPN_WIREGUARD)
-            val blockedApps = appRuleRepository.getByMode(AppMode.BLOCKED)
-
-            // Start byedpi (if wanted) before establish(): if it fails, nothing
-            // owning a TUN fd exists yet, so there's nothing to leak or unwind.
-            var byedpiAddr: String? = null
-            if (settingsStore.byedpiWrapEnabled.first()) {
-                val byedpiConfig = ByeDpiConfig(
-                    udpFakeCount = settingsStore.byedpiUdpFakeCount.first(),
-                    fakeTtl = settingsStore.byedpiFakeTtl.first(),
-                    customFakeData = settingsStore.byedpiCustomFakeData.first(),
-                    scriptMode = settingsStore.byedpiScriptMode.first(),
-                    rawArgs = settingsStore.byedpiRawArgs.first(),
-                )
-                try {
-                    byeDpiEngine.start(byedpiConfig)
-                    byedpiAddr = byedpiConfig.proxyAddress
-                } catch (e: Exception) {
-                    fail("byedpi failed to start: ${e.message}")
-                    return@launch
-                }
-            }
-
-            val builder = buildTun(config)
-            var includedAny = false
-            for (packageName in wireguardApps.map { it.packageName }) {
-                try {
-                    builder.addAllowedApplication(packageName)
-                    includedAny = true
-                } catch (_: PackageManager.NameNotFoundException) {
-                    // Uninstalled between sync() and now; skip it.
-                }
-            }
-            // byedpi/wireguard-go run inside our own process; never route our own traffic.
-            runCatching { builder.addDisallowedApplication(packageName) }
-
-            if (!includedAny) {
-                byeDpiEngine.stop()
-                fail("No apps are routed through WireGuard yet — set at least one app to \"WireGuard\" on the App List tab.")
-                return@launch
-            }
-
-            val established = builder.establish()
-            if (established == null) {
-                byeDpiEngine.stop()
-                fail("Android denied establishing the VPN (another VPN may already own it).")
-                return@launch
-            }
-            // From here, WireGuardBridge owns the raw fd (mirrors upstream
-            // GoBackend's own ParcelFileDescriptor.detachFd() use, and its own
-            // error paths already close it on failure — see app/src/main/go/api.go)
-            // — this service must not also try to close it.
-            val tunFd = established.detachFd()
-
-            try {
-                wireGuardEngine.start(
-                    interfaceName = "umbra0",
-                    tunFd = tunFd,
-                    config = config,
-                    byedpiAddr = byedpiAddr,
-                    protect = ::protect,
-                )
-            } catch (e: Exception) {
-                byeDpiEngine.stop()
-                fail("WireGuard failed to start: ${e.message}")
-                return@launch
-            }
-
-            shizukuFirewall.applyAll(blockedRules = blockedApps, unblockedRules = emptyList())
-            settingsStore.setLastError(null)
-            settingsStore.setRunning(true)
-            updateNotification(active = true)
         }
+    }
+
+    /** Outcome of everything that can fail before a VPN interface actually exists. */
+    private sealed interface LaunchOutcome {
+        data class Ready(
+            val config: Config,
+            val byedpiAddr: String?,
+            val builder: Builder,
+            val blockedApps: List<AppRule>,
+        ) : LaunchOutcome
+        data class Failed(val message: String) : LaunchOutcome
+    }
+
+    /** Loads/parses the WireGuard config, starts byedpi if enabled, and builds the app-scoped [Builder]. */
+    private suspend fun prepareLaunch(): LaunchOutcome {
+        val rawConfig = wireGuardConfigStore.loadRaw()
+            ?: return LaunchOutcome.Failed("No WireGuard config saved — paste one on the WireGuard tab first.")
+        val config = try {
+            WireGuardConfigStore.parse(rawConfig)
+        } catch (e: Exception) {
+            return LaunchOutcome.Failed("Invalid WireGuard config: ${e.message}")
+        }
+
+        val wireguardApps = appRuleRepository.getByMode(AppMode.VPN_WIREGUARD)
+        val blockedApps = appRuleRepository.getByMode(AppMode.BLOCKED)
+
+        // Start byedpi (if wanted) before establish(): if it fails, nothing
+        // owning a TUN fd exists yet, so there's nothing to leak or unwind.
+        val byedpiAddr = if (settingsStore.byedpiWrapEnabled.first()) {
+            val byedpiConfig = ByeDpiConfig(
+                udpFakeCount = settingsStore.byedpiUdpFakeCount.first(),
+                fakeTtl = settingsStore.byedpiFakeTtl.first(),
+                customFakeData = settingsStore.byedpiCustomFakeData.first(),
+                scriptMode = settingsStore.byedpiScriptMode.first(),
+                rawArgs = settingsStore.byedpiRawArgs.first(),
+            )
+            try {
+                byeDpiEngine.start(byedpiConfig)
+            } catch (e: Exception) {
+                return LaunchOutcome.Failed("byedpi failed to start: ${e.message}")
+            }
+            byedpiConfig.proxyAddress
+        } else {
+            null
+        }
+
+        val builder = buildTun(config)
+        val includedAny = includeWireGuardApps(builder, wireguardApps)
+        // byedpi/wireguard-go run inside our own process; never route our own traffic.
+        runCatching { builder.addDisallowedApplication(packageName) }
+
+        if (!includedAny) {
+            byeDpiEngine.stop()
+            return LaunchOutcome.Failed(
+                "No apps are routed through WireGuard yet — set at least one app to \"WireGuard\" on the App List tab.",
+            )
+        }
+        return LaunchOutcome.Ready(config, byedpiAddr, builder, blockedApps)
+    }
+
+    /** Adds each still-installed app to [builder]'s allow-list; returns whether at least one was added. */
+    private fun includeWireGuardApps(builder: Builder, wireguardApps: List<AppRule>): Boolean {
+        var includedAny = false
+        for (packageName in wireguardApps.map { it.packageName }) {
+            try {
+                builder.addAllowedApplication(packageName)
+                includedAny = true
+            } catch (_: PackageManager.NameNotFoundException) {
+                // Uninstalled between sync() and now; skip it.
+            }
+        }
+        return includedAny
+    }
+
+    /** Establishes the TUN and starts WireGuard now that [outcome] confirms everything else is ready. */
+    private suspend fun finishLaunch(outcome: LaunchOutcome.Ready) {
+        val established = outcome.builder.establish()
+        if (established == null) {
+            byeDpiEngine.stop()
+            fail("Android denied establishing the VPN (another VPN may already own it).")
+            return
+        }
+        // From here, WireGuardBridge owns the raw fd (mirrors upstream
+        // GoBackend's own ParcelFileDescriptor.detachFd() use, and its own
+        // error paths already close it on failure — see app/src/main/go/api.go)
+        // — this service must not also try to close it.
+        val tunFd = established.detachFd()
+
+        try {
+            wireGuardEngine.start(
+                interfaceName = "umbra0",
+                tunFd = tunFd,
+                config = outcome.config,
+                byedpiAddr = outcome.byedpiAddr,
+                protect = ::protect,
+            )
+        } catch (e: Exception) {
+            byeDpiEngine.stop()
+            fail("WireGuard failed to start: ${e.message}")
+            return
+        }
+
+        shizukuFirewall.applyAll(blockedRules = outcome.blockedApps, unblockedRules = emptyList())
+        settingsStore.setLastError(null)
+        settingsStore.setRunning(true)
+        updateNotification(active = true)
     }
 
     /** Builds the Builder's address/route/DNS/MTU from the parsed config's own [Interface]/[Peer] blocks. */
@@ -254,7 +280,9 @@ class UmbraVpnService : VpnService() {
         private const val NOTIFICATION_ID = 42
         private const val CHANNEL_ID = "umbra_tunnel"
 
-        /** Cloudflare's public resolver, used only when the user's own WireGuard config specifies no DNS server. */
-        private const val FALLBACK_DNS = "1.1.1.1"
+        // NOSONAR: this is Cloudflare's public DNS resolver (1.1.1.1), a well-known,
+        // publicly documented address — not an internal/sensitive host — used only
+        // as a fallback when the user's own WireGuard config specifies no DNS server.
+        private const val FALLBACK_DNS = "1.1.1.1" // NOSONAR
     }
 }

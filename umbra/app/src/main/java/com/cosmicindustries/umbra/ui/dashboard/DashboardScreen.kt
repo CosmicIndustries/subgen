@@ -46,52 +46,58 @@ fun DashboardScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = if (isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-            ),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Icon(Icons.Filled.Shield, contentDescription = null, modifier = Modifier.size(28.dp))
-                    Column {
-                        Text("Tunnel", style = MaterialTheme.typography.titleMedium)
-                        Text(if (isRunning) "Running" else "Stopped", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                Button(onClick = {
-                    if (isRunning) {
-                        viewModel.stop(context)
-                    } else {
-                        requestVpnConsent { viewModel.start(context) }
-                    }
-                }) { Text(if (isRunning) "Stop" else "Start") }
-            }
+        TunnelCard(isRunning = isRunning) {
+            if (isRunning) viewModel.stop(context) else requestVpnConsent { viewModel.start(context) }
         }
         lastError?.let {
             Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
 
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Shizuku firewall", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    when (shizukuStatus) {
-                        ShizukuStatus.NOT_RUNNING -> "Shizuku isn't running. Hard-blocked apps aren't enforced until it is."
-                        ShizukuStatus.PERMISSION_DENIED -> "Shizuku is running but Umbra hasn't been granted permission."
-                        ShizukuStatus.PERMISSION_GRANTED -> "Active — blocked apps are enforced at the OS level."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                if (shizukuStatus == ShizukuStatus.PERMISSION_DENIED) {
-                    OutlinedButton(onClick = { viewModel.requestShizukuPermission() }) {
-                        Text("Grant permission")
-                    }
+        ShizukuCard(status = shizukuStatus, onRequestPermission = { viewModel.requestShizukuPermission() })
+    }
+}
+
+@Composable
+private fun TunnelCard(isRunning: Boolean, onToggle: () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+        ),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Icon(Icons.Filled.Shield, contentDescription = null, modifier = Modifier.size(28.dp))
+                Column {
+                    Text("Tunnel", style = MaterialTheme.typography.titleMedium)
+                    Text(if (isRunning) "Running" else "Stopped", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Button(onClick = onToggle) { Text(if (isRunning) "Stop" else "Start") }
+        }
+    }
+}
+
+@Composable
+private fun ShizukuCard(status: ShizukuStatus, onRequestPermission: () -> Unit) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Shizuku firewall", style = MaterialTheme.typography.titleMedium)
+            Text(
+                when (status) {
+                    ShizukuStatus.NOT_RUNNING -> "Shizuku isn't running. Hard-blocked apps aren't enforced until it is."
+                    ShizukuStatus.PERMISSION_DENIED -> "Shizuku is running but Umbra hasn't been granted permission."
+                    ShizukuStatus.PERMISSION_GRANTED -> "Active — blocked apps are enforced at the OS level."
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (status == ShizukuStatus.PERMISSION_DENIED) {
+                OutlinedButton(onClick = onRequestPermission) {
+                    Text("Grant permission")
                 }
             }
         }

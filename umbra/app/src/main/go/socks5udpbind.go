@@ -51,11 +51,12 @@ type socks5Endpoint struct {
 	addr netip.AddrPort
 }
 
-// ClearSrc is empty deliberately: conn.Endpoint uses it to drop a cached
-// source address for roaming support, but this Bind only ever relays to the
-// one fixed peer address it was constructed with — there's no per-source
-// state here to clear.
-func (e *socks5Endpoint) ClearSrc()           {}
+func (e *socks5Endpoint) ClearSrc() {
+	// Deliberately empty: conn.Endpoint uses this to drop a cached source
+	// address for roaming support, but this Bind only ever relays to the one
+	// fixed peer address it was constructed with — no per-source state here
+	// to clear.
+}
 func (e *socks5Endpoint) SrcToString() string { return "" }
 func (e *socks5Endpoint) DstToString() string { return e.addr.String() }
 func (e *socks5Endpoint) DstToBytes() []byte {
